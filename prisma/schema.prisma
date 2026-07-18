@@ -1,0 +1,121 @@
+// Prisma schema for the Restaurant POS system.
+// SQLite keeps everything local — no cloud, no external services.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Single administrator account used to log in.
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Menu categories (Burgers, Pizza, Drinks, ...).
+model Category {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     MenuItem[]
+
+  @@index([name])
+}
+
+// A single sellable menu item.
+model MenuItem {
+  id          Int         @id @default(autoincrement())
+  name        String
+  description String?
+  price       Float
+  available   Boolean     @default(true)
+  image       String? // stored as a data URL / relative path (optional)
+  categoryId  Int
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Prevent duplicate item names inside the same category.
+  @@unique([name, categoryId])
+  @@index([categoryId])
+  @@index([name])
+  @@index([available])
+}
+
+// Optional customer record that can be attached to an order.
+model Customer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String?
+  notes     String?
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([phone])
+}
+
+// A completed sale.
+model Order {
+  id            Int         @id @default(autoincrement())
+  receiptNumber String      @unique
+  subtotal      Float
+  discount      Float       @default(0)
+  taxRate       Float       @default(0)
+  taxAmount     Float       @default(0)
+  grandTotal    Float
+  cashReceived  Float       @default(0)
+  change        Float       @default(0)
+  tableNumber   String?
+  status        String      @default("completed") // completed | active
+  customerId    Int?
+  customer      Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items         OrderItem[]
+  createdAt     DateTime    @default(now())
+
+  @@index([createdAt])
+  @@index([receiptNumber])
+  @@index([status])
+  @@index([customerId])
+}
+
+// Line item snapshot on an order (name/price copied so history is stable).
+model OrderItem {
+  id                  Int       @id @default(autoincrement())
+  orderId             Int
+  order               Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId          Int?
+  menuItem            MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  name                String
+  price               Float
+  quantity            Int
+  specialInstructions String?
+  lineTotal           Float
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+// Key/value application settings (single row, id = 1).
+model Settings {
+  id             Int      @id @default(1)
+  restaurantName String   @default("My Restaurant")
+  address        String   @default("")
+  phone          String   @default("")
+  taxPercentage  Float    @default(0)
+  currencySymbol String   @default("$")
+  receiptFooter  String   @default("Thank you for dining with us!")
+  darkMode       Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+}
