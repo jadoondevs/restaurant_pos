@@ -18,11 +18,18 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');
 
 let mainWindow: BrowserWindow | null = null;
+
+// Single flag that gates the entire graceful-shutdown sequence.
+// Set to true the moment we begin shutting down so re-entrant quit() calls
+// from window-all-closed or second app.quit() invocations are ignored.
 let isQuittingGracefully = false;
 
-// Ensure only one instance of the app can access the database at a time.
+// ---------------------------------------------------------------------------
+// Single-instance lock — prevents two processes sharing the same SQLite file.
+// ---------------------------------------------------------------------------
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  // Another instance is already running — bring it to the front and exit.
   app.quit();
 }
 
@@ -33,6 +40,9 @@ app.on('second-instance', () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Window creation
+// ---------------------------------------------------------------------------
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -52,6 +62,12 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
+  // When the main window is closed by the user, initiate graceful shutdown.
+  // We handle the actual quit in before-quit so the exit backup runs first.
+  mainWindow.on('close', () => {
+    mainWindow = null;
+  });
+
   if (VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL);
   } else {
@@ -59,8 +75,12 @@ function createWindow() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// App ready — migrations → bootstrap → scheduler → IPC → window
+// ---------------------------------------------------------------------------
 app.whenReady().then(async () => {
   // 1. Run schema migrations before anything else touches the database.
+  //    This handles fresh installs, upgrades, and restored backups.
   try {
     await runMigrations(prisma);
   } catch (err) {
@@ -93,30 +113,70 @@ app.whenReady().then(async () => {
   });
 });
 
-// Graceful exit: run exit backup, then quit.
-app.on('before-quit', async (event) => {
-  if (isQuittingGracefully) return; // already handled
-  if (isRestoreInProgress()) return; // restore handles its own exit
+// ---------------------------------------------------------------------------
+// Graceful shutdown sequence
+// ---------------------------------------------------------------------------
+//
+// Flow:
+//   User closes window
+//     → window-all-closed fires → app.quit()
+//     → before-quit fires (first time) → runs exit backup → cleanup → app.quit()
+//     → before-quit fires (second time) → isQuittingGracefully is true → returns
+//     → app exits
+//
+// The isQuittingGracefully flag prevents the sequence from running twice.
 
+app.on('before-quit', async (event) => {
+  // If a restore is in progress it handles its own exit via app.exit(0).
+  if (isRestoreInProgress()) return;
+
+  // Already in the shutdown sequence — let this quit() call through.
+  if (isQuittingGracefully) return;
+
+  // First time: intercept, run cleanup, then re-quit.
   event.preventDefault();
   isQuittingGracefully = true;
+
+  logger.info('main: graceful shutdown started');
 
   try {
     await backupService.runExitBackup();
   } catch (err) {
     logger.error('main: exit backup failed', { error: err });
-  } finally {
-    backupService.destroy();
-    printService.destroy();
-    await prisma.$disconnect();
-    app.quit();
   }
+
+  // Tear down services in order.
+  backupService.destroy();
+  printService.destroy();
+
+  // Explicitly destroy the main window so its renderer process exits cleanly.
+  // Without this, the renderer can keep the process alive after app.quit().
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy();
+    mainWindow = null;
+  }
+
+  // Destroy any other windows (e.g. the hidden print window if not already gone).
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.destroy();
+  }
+
+  try {
+    await prisma.$disconnect();
+    logger.info('main: Prisma disconnected');
+  } catch (err) {
+    logger.error('main: Prisma disconnect failed', { error: err });
+  }
+
+  logger.info('main: graceful shutdown complete — calling app.quit()');
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
+  // On macOS apps conventionally stay open until Cmd+Q.
+  // On all other platforms, closing the last window quits the app.
   if (process.platform !== 'darwin') {
     app.quit();
-    mainWindow = null;
   }
 });
 

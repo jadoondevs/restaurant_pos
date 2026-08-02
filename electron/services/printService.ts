@@ -5,7 +5,7 @@
  * a single hidden BrowserWindow instead of creating a new one per job.
  * Jobs are serialised through a promise chain so dialogs never overlap.
  */
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow } from 'electron';
 import { logger } from '../logger';
 
 export type PrintStatus = 'printed' | 'cancelled' | 'failed';
@@ -15,12 +15,12 @@ export interface PrintResult {
   error?: string;
 }
 
-const PRINT_TIMEOUT_MS = 60_000; // 60 s — enough for any dialog interaction
+const PRINT_TIMEOUT_MS = 60_000;
 
 class PrintService {
   private window: BrowserWindow | null = null;
-  // Serialise jobs: each job waits for the previous promise to settle.
   private queue: Promise<void> = Promise.resolve();
+  private destroyed = false;
 
   // ---------------------------------------------------------------------------
   // Lazy-create the hidden print window. Recreate it if it was destroyed.
@@ -39,9 +39,11 @@ class PrintService {
       },
     });
 
-    // Prevent the window from being shown if the user somehow triggers it.
+    // Hide instead of closing when the window receives a close event during
+    // normal operation. During app shutdown, destroy() is called explicitly
+    // so this handler is never reached.
     this.window.on('close', (e) => {
-      if (!app.isQuitting) {
+      if (!this.destroyed) {
         e.preventDefault();
         this.window?.hide();
       }
@@ -54,7 +56,10 @@ class PrintService {
   // Print a single HTML receipt. Returns a structured result — never throws.
   // ---------------------------------------------------------------------------
   print(html: string): Promise<PrintResult> {
-    // Chain onto the existing queue so jobs run one at a time.
+    if (this.destroyed) {
+      return Promise.resolve({ status: 'failed', error: 'Print service has been shut down.' });
+    }
+
     const job = new Promise<PrintResult>((resolve) => {
       this.queue = this.queue.then(() => this.runJob(html, resolve));
     });
@@ -65,6 +70,11 @@ class PrintService {
     html: string,
     resolve: (result: PrintResult) => void
   ): Promise<void> {
+    if (this.destroyed) {
+      resolve({ status: 'failed', error: 'Print service has been shut down.' });
+      return;
+    }
+
     let settled = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -78,10 +88,8 @@ class PrintService {
     try {
       const win = this.getWindow();
 
-      // Load the receipt HTML via data URL.
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 
-      // Timeout guard — if the print callback never fires, resolve as failed.
       timeoutHandle = setTimeout(() => {
         logger.warn('printService: print job timed out');
         settle({ status: 'failed', error: 'Print timed out.' });
@@ -115,15 +123,18 @@ class PrintService {
   }
 
   // ---------------------------------------------------------------------------
-  // Call on app quit to destroy the window cleanly.
+  // Called by main.ts during graceful shutdown.
+  // Sets the destroyed flag first so the close-event handler does not
+  // preventDefault, then destroys the window unconditionally.
   // ---------------------------------------------------------------------------
   destroy(): void {
+    this.destroyed = true;
     if (this.window && !this.window.isDestroyed()) {
       this.window.destroy();
       this.window = null;
     }
+    logger.info('printService: destroyed');
   }
 }
 
-// Singleton — one instance for the lifetime of the app.
 export const printService = new PrintService();
