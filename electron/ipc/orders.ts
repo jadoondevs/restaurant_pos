@@ -21,48 +21,15 @@ interface OrderInput {
 
 interface ListParams {
   search?: string;
-  from?: string; // ISO date
-  to?: string;   // ISO date
+  from?: string;
+  to?: string;
   limit?: number;
-}
-
-/**
- * Atomically allocates the next receipt number for today.
- * Uses ReceiptCounter with an upsert so numbers are never reused,
- * even after orders are deleted.
- * Format: R-YYYYMMDD-0001
- */
-async function allocateReceiptNumber(): Promise<string> {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const dateKey = `${y}${m}${d}`;
-
-  // Increment the counter atomically inside a transaction.
-  const counter = await prisma.$transaction(async (tx) => {
-    // Upsert: create with lastSeq=1 if not exists, otherwise increment.
-    await tx.$executeRawUnsafe(
-      `INSERT INTO "ReceiptCounter" ("dateKey", "lastSeq")
-       VALUES (?, 1)
-       ON CONFLICT ("dateKey") DO UPDATE SET "lastSeq" = "lastSeq" + 1`,
-      dateKey
-    );
-    const rows = await tx.$queryRawUnsafe<{ lastSeq: number }[]>(
-      `SELECT "lastSeq" FROM "ReceiptCounter" WHERE "dateKey" = ?`,
-      dateKey
-    );
-    return rows[0].lastSeq;
-  });
-
-  const seq = String(counter).padStart(4, '0');
-  return `R-${y}${m}${d}-${seq}`;
 }
 
 /**
  * Peeks at the next receipt number without persisting anything.
  * Used by the renderer to display the receipt number before the user
- * confirms the sale. The actual allocation happens in orders:create.
+ * confirms the sale. The actual allocation happens inside orders:create.
  */
 async function peekReceiptNumber(): Promise<string> {
   const now = new Date();
@@ -105,15 +72,15 @@ export function registerOrderHandlers() {
     const cashReceived = input.cashReceived ?? grandTotal;
     const change = +(Math.max(0, cashReceived - grandTotal)).toFixed(2);
 
-    // Allocate receipt number and create the order atomically.
+    // Allocate receipt number and create the order atomically in one transaction.
     return prisma.$transaction(async (tx) => {
-      // Allocate receipt number inside the transaction.
       const now = new Date();
       const y = now.getFullYear();
       const mo = String(now.getMonth() + 1).padStart(2, '0');
       const dy = String(now.getDate()).padStart(2, '0');
       const dateKey = `${y}${mo}${dy}`;
 
+      // Atomic upsert: create counter row with seq=1, or increment existing.
       await tx.$executeRawUnsafe(
         `INSERT INTO "ReceiptCounter" ("dateKey", "lastSeq")
          VALUES (?, 1)
@@ -196,7 +163,7 @@ export function registerOrderHandlers() {
 
   handle('orders:delete', async (id: number) => {
     await prisma.order.delete({ where: { id } });
-    // Note: ReceiptCounter is intentionally NOT decremented.
+    // ReceiptCounter is intentionally NOT decremented.
     // Deleted orders must never cause receipt number reuse.
     return { success: true };
   });

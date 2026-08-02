@@ -86,13 +86,11 @@ async function isDatabaseEmpty(prisma: PrismaClient): Promise<boolean> {
  */
 function resolvePrismaBin(): string {
   const appRoot = process.env.APP_ROOT ?? process.cwd();
-  // Windows: .cmd wrapper; Unix: plain binary
   const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
   const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
   if (fs.existsSync(winBin)) return winBin;
   if (fs.existsSync(unixBin)) return unixBin;
-  // Fallback: let the shell resolve it via PATH
-  return 'npx prisma';
+  return 'npx prisma'; // fallback: let the shell resolve via PATH
 }
 
 // ---------------------------------------------------------------------------
@@ -100,18 +98,13 @@ function resolvePrismaBin(): string {
 // ---------------------------------------------------------------------------
 async function initialiseSchema(prisma: PrismaClient): Promise<void> {
   if (!app.isPackaged) {
-    // -----------------------------------------------------------------------
-    // Development: invoke the local prisma binary with db push.
-    // This always reflects the current schema.prisma exactly.
-    // -----------------------------------------------------------------------
     const appRoot = process.env.APP_ROOT ?? process.cwd();
     const dbUrl = process.env.DATABASE_URL ?? 'file:./prisma/dev.db';
     const prismaBin = resolvePrismaBin();
 
     logger.info('migrator: fresh dev database — running prisma db push', { prismaBin });
 
-    // spawnSync is intentional here: we must block until the schema is ready
-    // before the rest of the startup sequence continues.
+    // spawnSync is intentional: we must block until the schema is ready.
     const result = spawnSync(
       prismaBin,
       ['db', 'push', '--skip-generate', '--accept-data-loss'],
@@ -135,11 +128,6 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
 
     logger.info('migrator: prisma db push succeeded — schema initialised');
   } else {
-    // -----------------------------------------------------------------------
-    // Packaged: copy the bundled template.db over the empty file.
-    // template.db is built by `npm run prepare:db` during the dist pipeline
-    // and always matches the schema at build time.
-    // -----------------------------------------------------------------------
     const templatePath = path.join(process.resourcesPath, 'prisma', 'template.db');
     if (!fs.existsSync(templatePath)) {
       throw new Error(
@@ -149,10 +137,8 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
     }
 
     const dbPath = path.join(app.getPath('userData'), 'pos.db');
-
     logger.info('migrator: fresh packaged install — copying template.db', { dbPath });
 
-    // Disconnect before replacing the file, reconnect after.
     await prisma.$disconnect();
     fs.copyFileSync(templatePath, dbPath);
     await prisma.$connect();
@@ -288,8 +274,3 @@ export async function runMigrations(prisma: PrismaClient): Promise<void> {
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Exported helpers used by tests (no Electron dependency).
-// ---------------------------------------------------------------------------
-export { isDatabaseEmpty, tableExists, columnExists };

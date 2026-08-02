@@ -12,11 +12,10 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { shell, safeStorage } from 'electron';
+import path from 'node:path';
+import { app, shell, safeStorage } from 'electron';
 import { getTokenPath } from '../paths';
 import { logger } from '../logger';
-import path from 'node:path';
-import { app } from 'electron';
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -127,9 +126,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<OAuthTok
 export async function getValidAccessToken(): Promise<string> {
   const tokens = loadTokens();
   if (!tokens) throw new Error('Not authenticated with Google Drive.');
-
   if (Date.now() < tokens.expires_at) return tokens.access_token;
-
   const refreshed = await refreshAccessToken(tokens.refresh_token);
   saveTokens(refreshed);
   return refreshed.access_token;
@@ -177,7 +174,7 @@ export async function authenticate(): Promise<OAuthTokens> {
       prompt: 'consent',
     }).toString();
 
-  // Start a one-shot local HTTP server to receive the redirect.
+  // Start a one-shot local HTTP server to receive the OAuth redirect.
   const code = await new Promise<string>((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
@@ -206,14 +203,16 @@ export async function authenticate(): Promise<OAuthTokens> {
 
     server.on('error', reject);
 
-    // Timeout after 5 minutes.
-    setTimeout(() => {
-      server.close();
+    // Timeout after 5 minutes. unref() so this timer does not keep the
+    // process alive if the app is closed while the OAuth flow is open.
+    const timeoutHandle = setTimeout(() => {
+      try { server.close(); } catch { /* already closed by a successful redirect */ }
       reject(new Error('OAuth flow timed out. Please try again.'));
     }, 5 * 60 * 1000);
+    timeoutHandle.unref();
   });
 
-  // Exchange the code for tokens.
+  // Exchange the authorization code for tokens.
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
