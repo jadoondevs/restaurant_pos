@@ -5,7 +5,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatCurrency, formatTime } from '@/utils/format';
-import { buildReceiptHtml } from '@/utils/receipt';
+import { buildReceiptHtml, orderToReceiptData } from '@/utils/receipt';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -37,8 +37,16 @@ export function Orders() {
     if (!settings) return;
     try {
       const full = await api.getOrder(order.id);
-      await api.printReceipt(buildReceiptHtml(full, settings));
-      toast('Receipt sent to printer.', 'success');
+      const receiptData = orderToReceiptData(full);
+      const html = buildReceiptHtml(receiptData, settings);
+      const result = await api.printReceipt(html);
+      if (result.status === 'printed') {
+        toast('Receipt sent to printer.', 'success');
+      } else if (result.status === 'cancelled') {
+        toast('Print cancelled.', 'error');
+      } else {
+        toast(result.error ?? 'Print failed.', 'error');
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Print failed.', 'error');
     }
@@ -164,7 +172,10 @@ export function Orders() {
               {selected.discount > 0 && (
                 <Line label="Discount" value={`-${formatCurrency(selected.discount, sym)}`} />
               )}
-              <Line label={`Tax (${selected.taxRate}%)`} value={formatCurrency(selected.taxAmount, sym)} />
+              <Line
+                label={`Tax (${selected.taxRate}%)`}
+                value={formatCurrency(selected.taxAmount, sym)}
+              />
               <Line label="Total" value={formatCurrency(selected.grandTotal, sym)} bold />
               <Line label="Cash" value={formatCurrency(selected.cashReceived, sym)} />
               <Line label="Change" value={formatCurrency(selected.change, sym)} />

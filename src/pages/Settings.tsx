@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { PageHeader, PageLoader } from '@/components/ui/Misc';
+import { BackupSection } from '@/components/BackupSection';
 import type { Settings as SettingsType } from '@/types';
 
 export function Settings() {
@@ -41,6 +42,7 @@ export function Settings() {
         currencySymbol: form.currencySymbol,
         receiptFooter: form.receiptFooter,
         darkMode: form.darkMode,
+        receiptPaperSize: form.receiptPaperSize,
       });
       toast('Settings saved.', 'success');
     } catch (e) {
@@ -103,7 +105,7 @@ export function Settings() {
 
         <Card>
           <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            Billing & Receipt
+            Billing &amp; Receipt
           </h2>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -113,13 +115,28 @@ export function Settings() {
                 min={0}
                 step="0.1"
                 value={form.taxPercentage}
-                onChange={(e) => setForm({ ...form, taxPercentage: parseFloat(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setForm({ ...form, taxPercentage: parseFloat(e.target.value) || 0 })
+                }
               />
               <Input
                 label="Currency Symbol"
                 value={form.currencySymbol}
                 onChange={(e) => setForm({ ...form, currencySymbol: e.target.value })}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Receipt Paper Size
+              </label>
+              <select
+                value={form.receiptPaperSize}
+                onChange={(e) => setForm({ ...form, receiptPaperSize: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+              >
+                <option value="80mm">80mm Thermal Printer</option>
+                <option value="A4">A4 (Standard Printer)</option>
+              </select>
             </div>
             <Textarea
               label="Receipt Footer"
@@ -147,6 +164,8 @@ export function Settings() {
             />
           </label>
         </Card>
+
+        <BackupSection />
 
         <Card>
           <div className="flex items-center justify-between">
