@@ -38,7 +38,7 @@ model MenuItem {
   description String?
   price       Float
   available   Boolean     @default(true)
-  image       String? // stored as a data URL / relative path (optional)
+  image       String?     // stored as a data URL / relative path (optional)
   categoryId  Int
   category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems  OrderItem[]
@@ -78,6 +78,7 @@ model Order {
   cashReceived  Float       @default(0)
   change        Float       @default(0)
   tableNumber   String?
+  cashierName   String?     // name of the logged-in cashier at time of sale
   status        String      @default("completed") // completed | active
   customerId    Int?
   customer      Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -109,13 +110,40 @@ model OrderItem {
 
 // Key/value application settings (single row, id = 1).
 model Settings {
-  id             Int      @id @default(1)
-  restaurantName String   @default("My Restaurant")
-  address        String   @default("")
-  phone          String   @default("")
-  taxPercentage  Float    @default(0)
-  currencySymbol String   @default("$")
-  receiptFooter  String   @default("Thank you for dining with us!")
-  darkMode       Boolean  @default(false)
-  updatedAt      DateTime @updatedAt
+  id                 Int      @id @default(1)
+  restaurantName     String   @default("My Restaurant")
+  address            String   @default("")
+  phone              String   @default("")
+  taxPercentage      Float    @default(0)
+  currencySymbol     String   @default("$")
+  receiptFooter      String   @default("Thank you for dining with us!")
+  darkMode           Boolean  @default(false)
+  receiptPaperSize   String   @default("80mm")
+  backupSchedule     String   @default("daily")
+  backupOnExit       Boolean  @default(true)
+  cloudBackupEnabled Boolean  @default(false)
+  updatedAt          DateTime @updatedAt
+}
+
+// Monotonic per-day receipt counter — never resets, never reuses numbers.
+// dateKey format: YYYYMMDD
+model ReceiptCounter {
+  dateKey String @id
+  lastSeq Int    @default(0)
+}
+
+// Audit log of every backup attempt (local and cloud).
+model BackupRecord {
+  id            Int      @id @default(autoincrement())
+  filename      String
+  filePath      String
+  fileSizeBytes Int      @default(0)
+  trigger       String
+  cloudStatus   String   @default("none")
+  cloudFileId   String?
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([cloudStatus])
 }
