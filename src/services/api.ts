@@ -7,6 +7,9 @@ import type {
   DashboardStats,
   ReportSummary,
   TopItem,
+  PrintResult,
+  BackupStatus,
+  BackupRecord,
 } from '@/types';
 import type { IpcResult } from '@/types/electron';
 
@@ -49,6 +52,7 @@ export const api = {
     unwrap<Order[]>(window.api.ordersList(params)),
   getOrder: (id: number) => unwrap<Order>(window.api.orderGet(id)),
   deleteOrder: (id: number) => unwrap(window.api.orderDelete(id)),
+  peekReceiptNumber: () => unwrap<string>(window.api.orderPeekReceiptNumber()),
 
   // Customers
   listCustomers: (search?: string) => unwrap<Customer[]>(window.api.customersList(search)),
@@ -68,6 +72,24 @@ export const api = {
   getSettings: () => unwrap<Settings>(window.api.settingsGet()),
   updateSettings: (data: Partial<Settings>) => unwrap<Settings>(window.api.settingsUpdate(data)),
 
-  // Printing
-  printReceipt: (html: string) => unwrap(window.api.printReceipt(html)),
+  // Printing — returns PrintResult (never throws on cancel/fail, only on IPC error)
+  printReceipt: (html: string) => unwrap<PrintResult>(window.api.printReceipt(html)),
+
+  // Backup
+  backupStatus: () => unwrap<BackupStatus>(window.api.backupStatus()),
+  backupList: () => unwrap<BackupRecord[]>(window.api.backupList()),
+  backupNow: () => unwrap<{ filename: string; cloudStatus: string }>(window.api.backupNow()),
+  backupValidate: (filePath: string) =>
+    unwrap<{ valid: boolean; error?: string }>(window.api.backupValidate(filePath)),
+  backupRestore: (filePath: string) => unwrap(window.api.backupRestore(filePath)),
+  backupConnectCloud: () => unwrap(window.api.backupConnectCloud()),
+  backupDisconnectCloud: () => unwrap(window.api.backupDisconnectCloud()),
+  backupOpenFolder: () => unwrap(window.api.backupOpenFolder()),
+  backupRetryUploads: () =>
+    unwrap<{ uploaded: number; total: number }>(window.api.backupRetryUploads()),
+  backupUpdateSchedule: (data: {
+    backupSchedule?: string;
+    backupOnExit?: boolean;
+    cloudBackupEnabled?: boolean;
+  }) => unwrap(window.api.backupUpdateSchedule(data)),
 };

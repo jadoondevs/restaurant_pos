@@ -52,6 +52,7 @@ export interface Order {
   cashReceived: number;
   change: number;
   tableNumber: string | null;
+  cashierName: string | null;
   status: string;
   customerId: number | null;
   customer?: Customer | null;
@@ -68,6 +69,10 @@ export interface Settings {
   currencySymbol: string;
   receiptFooter: string;
   darkMode: boolean;
+  receiptPaperSize: string;    // '80mm' | 'A4'
+  backupSchedule: string;      // 'daily' | 'weekly' | 'manual'
+  backupOnExit: boolean;
+  cloudBackupEnabled: boolean;
 }
 
 export interface DashboardStats {
@@ -100,4 +105,64 @@ export interface CartItem {
   price: number;
   quantity: number;
   specialInstructions?: string;
+}
+
+// Result returned by the print IPC handler.
+export interface PrintResult {
+  status: 'printed' | 'cancelled' | 'failed';
+  error?: string;
+}
+
+// Cloud account info.
+export interface CloudAccount {
+  email: string;
+  displayName: string;
+}
+
+// Backup status returned by backup:status IPC.
+export interface BackupStatus {
+  cloudConnected: boolean;
+  cloudAccount: CloudAccount | null;
+  providerName: string;
+  lastLocalBackup: string | null;
+  lastCloudBackup: string | null;
+  pendingUploads: number;
+  backupFolder: string;
+  dbSizeBytes: number;
+  localBackupCount: number;
+  backupSchedule: string;
+  backupOnExit: boolean;
+  cloudBackupEnabled: boolean;
+  isRunning: boolean;
+}
+
+// A local backup file entry.
+export interface BackupRecord {
+  filename: string;
+  filePath: string;
+  fileSizeBytes: number;
+  createdAt: string;
+}
+
+// Data needed to render a receipt — works for both saved orders and drafts.
+export interface ReceiptData {
+  receiptNumber: string;
+  createdAt: string; // ISO string
+  tableNumber: string | null;
+  cashierName: string | null;
+  customer: Customer | null;
+  items: {
+    name: string;
+    price: number;
+    quantity: number;
+    specialInstructions: string | null;
+    lineTotal: number;
+  }[];
+  subtotal: number;
+  discount: number;
+  taxRate: number;
+  taxAmount: number;
+  grandTotal: number;
+  cashReceived: number;
+  change: number;
 }

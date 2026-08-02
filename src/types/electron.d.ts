@@ -28,6 +28,7 @@ export interface ElectronApi {
   ordersList(params?: unknown): Promise<IpcResult<any[]>>;
   orderGet(id: number): Promise<IpcResult<any>>;
   orderDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
+  orderPeekReceiptNumber(): Promise<IpcResult<string>>;
 
   // Customers
   customersList(search?: string): Promise<IpcResult<any[]>>;
@@ -45,7 +46,19 @@ export interface ElectronApi {
   settingsUpdate(data: unknown): Promise<IpcResult<any>>;
 
   // Printing
-  printReceipt(html: string): Promise<IpcResult<{ success: boolean }>>;
+  printReceipt(html: string): Promise<IpcResult<{ status: string; error?: string }>>;
+
+  // Backup
+  backupStatus(): Promise<IpcResult<any>>;
+  backupList(): Promise<IpcResult<any[]>>;
+  backupNow(): Promise<IpcResult<{ filename: string; cloudStatus: string }>>;
+  backupValidate(filePath: string): Promise<IpcResult<{ valid: boolean; error?: string }>>;
+  backupRestore(filePath: string): Promise<IpcResult<{ success: boolean }>>;
+  backupConnectCloud(): Promise<IpcResult<any>>;
+  backupDisconnectCloud(): Promise<IpcResult<{ success: boolean }>>;
+  backupOpenFolder(): Promise<IpcResult<{ success: boolean }>>;
+  backupRetryUploads(): Promise<IpcResult<{ uploaded: number; total: number }>>;
+  backupUpdateSchedule(data: unknown): Promise<IpcResult<{ success: boolean }>>;
 }
 
 declare global {
