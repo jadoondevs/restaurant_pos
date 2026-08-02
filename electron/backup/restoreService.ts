@@ -10,21 +10,22 @@
  *   6. Tear down all services (backup scheduler, print service, Prisma).
  *   7. Destroy all BrowserWindows.
  *   8. Atomic file swap (WAL + SHM cleanup).
- *   9. Release single-instance lock, then app.relaunch() + app.exit(0).
+ *   9. Packaged: release lock + app.relaunch() + app.exit(0).
+ *      Dev: show restart dialog + app.exit(0).
  *
  * The live database is NEVER overwritten before all validation passes.
  * Services are torn down BEFORE the file swap so the DB is fully released.
  *
- * IMPORTANT — single-instance lock:
- *   app.relaunch() spawns the new process immediately. If the old process
- *   still holds the single-instance lock when the new process starts, the
- *   new process sees gotLock=false and calls app.quit() — producing a blank
- *   window that hangs. We must call app.releaseSingleInstanceLock() before
- *   app.relaunch() so the new process can acquire the lock and start normally.
+ * WHY DIFFERENT BEHAVIOUR IN DEV vs PACKAGED:
+ *   app.relaunch() relaunches the raw Electron binary. In a packaged build
+ *   this is correct — the binary IS the app. In dev, the app is started via
+ *   `npm run dev` (Vite + Electron). Relaunching the raw binary skips Vite,
+ *   so the renderer cannot connect and the window hangs blank. In dev we
+ *   therefore exit cleanly and ask the user to restart manually.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import { PrismaClient } from '@prisma/client';
 import { getDbPath, getBackupDir } from '../paths';
 import { logger } from '../logger';
@@ -189,19 +190,28 @@ class RestoreService {
       );
     }
 
-    // --- Step 7: release lock, relaunch, exit ---
-    //
-    // CRITICAL ORDER:
-    //   1. app.releaseSingleInstanceLock() — frees the lock so the new process
-    //      can acquire it. Without this, the new process sees gotLock=false,
-    //      calls app.quit() immediately, and produces a blank hanging window.
-    //   2. app.relaunch()  — registers the new process to start after exit.
-    //   3. app.exit(0)     — terminates immediately, bypassing before-quit,
-    //      so the graceful-shutdown sequence in main.ts does not run.
-    logger.info('restoreService: releasing lock and relaunching');
-    app.releaseSingleInstanceLock();
-    app.relaunch();
-    app.exit(0);
+    // --- Step 7: exit (packaged) or prompt manual restart (dev) ---
+    if (app.isPackaged) {
+      // Packaged build: release the single-instance lock so the new process
+      // can acquire it, then relaunch and exit cleanly.
+      logger.info('restoreService: packaged — releasing lock and relaunching');
+      app.releaseSingleInstanceLock();
+      app.relaunch();
+      app.exit(0);
+    } else {
+      // Development: app.relaunch() would launch the raw Electron binary
+      // without the Vite dev server, causing a blank window. Exit cleanly
+      // and ask the user to restart with `npm run dev`.
+      logger.info('restoreService: dev — exiting, manual restart required');
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'Restore Complete',
+        message: 'Database restored successfully.',
+        detail: 'Please restart the application with `npm run dev` to continue.',
+        buttons: ['OK'],
+      });
+      app.exit(0);
+    }
   }
 }
 

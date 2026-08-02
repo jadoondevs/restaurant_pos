@@ -10,8 +10,9 @@
  *      the fresh schema already satisfies them all.
  *
  *      Dev:      invokes the local prisma binary (node_modules/.bin/prisma)
- *                with `db push`. Falls back to npx only if the local binary
- *                is absent. Never relies on a globally installed Prisma CLI.
+ *                with `db push`. Uses shell:false with the resolved absolute
+ *                path so cmd.exe is never involved (avoids spurious Windows
+ *                "process not found" errors from cmd.exe cleanup).
  *      Packaged: copies the bundled prisma/template.db over the empty file.
  *
  *   2. EXISTING DATABASE (upgrade path)
@@ -81,16 +82,25 @@ async function isDatabaseEmpty(prisma: PrismaClient): Promise<boolean> {
 }
 
 /**
- * Resolves the path to the local prisma CLI binary.
- * Uses node_modules/.bin/prisma so we never depend on a global install.
+ * Resolves the absolute path to the local prisma CLI binary.
+ * Returns the full path so spawnSync can be called with shell:false,
+ * avoiding cmd.exe on Windows and its spurious cleanup error messages.
  */
-function resolvePrismaBin(): string {
+function resolvePrismaBin(): { bin: string; useShell: boolean } {
   const appRoot = process.env.APP_ROOT ?? process.cwd();
   const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
   const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
-  if (fs.existsSync(winBin)) return winBin;
-  if (fs.existsSync(unixBin)) return unixBin;
-  return 'npx prisma'; // fallback: let the shell resolve via PATH
+
+  // On Windows, .cmd files require shell:true to execute.
+  // On Unix, the binary is directly executable with shell:false.
+  if (process.platform === 'win32') {
+    if (fs.existsSync(winBin)) return { bin: winBin, useShell: true };
+    // Fallback: use cmd.exe with npx
+    return { bin: 'npx', useShell: true };
+  }
+
+  if (fs.existsSync(unixBin)) return { bin: unixBin, useShell: false };
+  return { bin: 'npx', useShell: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -100,17 +110,18 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
   if (!app.isPackaged) {
     const appRoot = process.env.APP_ROOT ?? process.cwd();
     const dbUrl = process.env.DATABASE_URL ?? 'file:./prisma/dev.db';
-    const prismaBin = resolvePrismaBin();
+    const { bin, useShell } = resolvePrismaBin();
 
-    logger.info('migrator: fresh dev database — running prisma db push', { prismaBin });
+    logger.info('migrator: fresh dev database — running prisma db push', { bin, useShell });
 
-    // spawnSync is intentional: we must block until the schema is ready.
+    // spawnSync is intentional: we must block until the schema is ready
+    // before the rest of the startup sequence continues.
     const result = spawnSync(
-      prismaBin,
+      bin,
       ['db', 'push', '--skip-generate', '--accept-data-loss'],
       {
         stdio: 'pipe',
-        shell: true,
+        shell: useShell,
         env: { ...process.env, DATABASE_URL: dbUrl },
         cwd: appRoot,
       }
