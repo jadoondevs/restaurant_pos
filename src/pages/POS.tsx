@@ -5,17 +5,23 @@ import { useCart } from '@/hooks/useCart';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/utils/format';
 import { buildReceiptHtml } from '@/utils/receipt';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { EmptyState, Spinner } from '@/components/ui/Misc';
-import type { Category, MenuItem, Customer, Order } from '@/types';
+import type { Category, MenuItem, Customer, ReceiptData } from '@/types';
+
+type CheckoutIssue =
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; error: string };
 
 export function POS() {
   const { settings } = useSettings();
   const { toast } = useToast();
+  const { user } = useAuth();
   const sym = settings?.currencySymbol ?? '$';
   const taxPct = settings?.taxPercentage ?? 0;
 
@@ -36,6 +42,11 @@ export function POS() {
   const [saving, setSaving] = useState(false);
   const [instructionFor, setInstructionFor] = useState<number | null>(null);
   const [instructionText, setInstructionText] = useState('');
+
+  // Print-first checkout state.
+  const [checkoutIssue, setCheckoutIssue] = useState<CheckoutIssue | null>(null);
+  // Holds the draft receipt data while waiting for user decision after cancel/fail.
+  const [pendingReceipt, setPendingReceipt] = useState<ReceiptData | null>(null);
 
   // Load categories + customers once.
   useEffect(() => {
@@ -73,38 +84,139 @@ export function POS() {
     setInstructionText('');
   };
 
+  // ---------------------------------------------------------------------------
+  // Saves the order to the database and clears the cart.
+  // ---------------------------------------------------------------------------
+  const commitSale = async (receiptData: ReceiptData) => {
+    const order = await api.createOrder({
+      items: receiptData.items.map((i) => ({
+        menuItemId: cart.items.find((c) => c.name === i.name)?.menuItemId ?? null,
+        name: i.name,
+        price: i.price,
+        quantity: i.quantity,
+        specialInstructions: i.specialInstructions,
+      })),
+      discount: receiptData.discount,
+      taxRate: receiptData.taxRate,
+      cashReceived: receiptData.cashReceived,
+      tableNumber: receiptData.tableNumber,
+      customerId,
+      cashierName: receiptData.cashierName,
+    });
+    toast(`Sale complete — ${order.receiptNumber}`, 'success');
+    cart.clear();
+    setCashReceived('');
+    setTableNumber('');
+    setCustomerId(null);
+    setPayOpen(false);
+    setCheckoutIssue(null);
+    setPendingReceipt(null);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Main checkout handler: print first, then decide.
+  // ---------------------------------------------------------------------------
   const completeSale = async () => {
     if (cart.isEmpty) {
       toast('Cannot complete an empty order.', 'error');
       return;
     }
+    if (!settings) return;
+
     setSaving(true);
     try {
-      const order: Order = await api.createOrder({
-        items: cart.items,
+      // 1. Peek the next receipt number (no DB write yet).
+      const receiptNumber = await api.peekReceiptNumber();
+
+      // 2. Build the draft receipt.
+      const cashAmt = parseFloat(cashReceived) || cart.totals.grandTotal;
+      const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
+
+      const receiptData: ReceiptData = {
+        receiptNumber,
+        createdAt: new Date().toISOString(),
+        tableNumber: tableNumber || null,
+        cashierName: user?.username ?? null,
+        customer: selectedCustomer,
+        items: cart.items.map((i) => ({
+          name: i.name,
+          price: i.price,
+          quantity: i.quantity,
+          specialInstructions: i.specialInstructions ?? null,
+          lineTotal: +(i.price * i.quantity).toFixed(2),
+        })),
+        subtotal: cart.totals.subtotal,
         discount: cart.totals.discount,
         taxRate: taxPct,
-        cashReceived: parseFloat(cashReceived) || cart.totals.grandTotal,
-        tableNumber: tableNumber || null,
-        customerId,
-      });
+        taxAmount: cart.totals.taxAmount,
+        grandTotal: cart.totals.grandTotal,
+        cashReceived: cashAmt,
+        change: Math.max(0, cashAmt - cart.totals.grandTotal),
+      };
 
-      // Print the receipt.
-      if (settings) {
-        await api.printReceipt(buildReceiptHtml({ ...order, customer: order.customer }, settings));
+      // 3. Print the receipt.
+      const html = buildReceiptHtml(receiptData, settings);
+      const printResult = await api.printReceipt(html);
+
+      if (printResult.status === 'printed') {
+        // 4a. Print succeeded — save the order.
+        await commitSale(receiptData);
+      } else if (printResult.status === 'cancelled') {
+        // 4b. User cancelled the print dialog.
+        setPendingReceipt(receiptData);
+        setCheckoutIssue({ kind: 'cancelled' });
+      } else {
+        // 4c. Print failed.
+        setPendingReceipt(receiptData);
+        setCheckoutIssue({ kind: 'failed', error: printResult.error ?? 'Unknown print error.' });
       }
-
-      toast(`Sale complete — ${order.receiptNumber}`, 'success');
-      cart.clear();
-      setCashReceived('');
-      setTableNumber('');
-      setCustomerId(null);
-      setPayOpen(false);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Failed to complete sale.', 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Retry print from the issue dialog.
+  // ---------------------------------------------------------------------------
+  const retryPrint = async () => {
+    if (!pendingReceipt || !settings) return;
+    setSaving(true);
+    try {
+      const html = buildReceiptHtml(pendingReceipt, settings);
+      const printResult = await api.printReceipt(html);
+      if (printResult.status === 'printed') {
+        await commitSale(pendingReceipt);
+      } else if (printResult.status === 'cancelled') {
+        setCheckoutIssue({ kind: 'cancelled' });
+      } else {
+        setCheckoutIssue({ kind: 'failed', error: printResult.error ?? 'Unknown print error.' });
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Retry failed.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Complete sale without printing.
+  const completeWithoutPrinting = async () => {
+    if (!pendingReceipt) return;
+    setSaving(true);
+    try {
+      await commitSale(pendingReceipt);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to complete sale.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Cancel the sale entirely — nothing is written to the DB.
+  const cancelSale = () => {
+    setCheckoutIssue(null);
+    setPendingReceipt(null);
   };
 
   return (
@@ -281,7 +393,7 @@ export function POS() {
 
       {/* Payment modal */}
       <Modal
-        open={payOpen}
+        open={payOpen && checkoutIssue === null}
         title="Payment"
         onClose={() => setPayOpen(false)}
         footer={
@@ -341,6 +453,57 @@ export function POS() {
             </span>
           </div>
         </div>
+      </Modal>
+
+      {/* Print cancelled dialog */}
+      <Modal
+        open={checkoutIssue?.kind === 'cancelled'}
+        title="Printing Cancelled"
+        onClose={cancelSale}
+        maxWidth="max-w-md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={cancelSale}>
+              Cancel Sale
+            </Button>
+            <Button
+              variant="success"
+              onClick={() => pendingReceipt && completeWithoutPrinting()}
+              disabled={saving}
+            >
+              {saving ? <Spinner className="h-5 w-5" /> : 'Complete Sale'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Printing was cancelled. Do you still want to complete this sale?
+        </p>
+      </Modal>
+
+      {/* Print failed dialog */}
+      <Modal
+        open={checkoutIssue?.kind === 'failed'}
+        title="Printing Failed"
+        onClose={cancelSale}
+        maxWidth="max-w-md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={cancelSale}>
+              Cancel Sale
+            </Button>
+            <Button variant="secondary" onClick={() => pendingReceipt && completeWithoutPrinting()} disabled={saving}>
+              Complete Without Printing
+            </Button>
+            <Button variant="primary" onClick={retryPrint} disabled={saving}>
+              {saving ? <Spinner className="h-5 w-5" /> : 'Retry Print'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {checkoutIssue?.kind === 'failed' ? checkoutIssue.error : ''}
+        </p>
       </Modal>
 
       {/* Special instructions modal */}
