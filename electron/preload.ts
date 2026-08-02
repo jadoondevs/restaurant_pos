@@ -30,6 +30,7 @@ const api = {
   ordersList: (params?: unknown) => ipcRenderer.invoke('orders:list', params),
   orderGet: (id: number) => ipcRenderer.invoke('orders:get', id),
   orderDelete: (id: number) => ipcRenderer.invoke('orders:delete', id),
+  orderPeekReceiptNumber: () => ipcRenderer.invoke('orders:peekReceiptNumber'),
 
   // Customers
   customersList: (search?: string) => ipcRenderer.invoke('customers:list', search),
@@ -47,8 +48,20 @@ const api = {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsUpdate: (data: unknown) => ipcRenderer.invoke('settings:update', data),
 
-  // Printing
+  // Printing — returns { status: 'printed'|'cancelled'|'failed', error?: string }
   printReceipt: (html: string) => ipcRenderer.invoke('print:receipt', html),
+
+  // Backup
+  backupStatus: () => ipcRenderer.invoke('backup:status'),
+  backupList: () => ipcRenderer.invoke('backup:list'),
+  backupNow: () => ipcRenderer.invoke('backup:now'),
+  backupValidate: (filePath: string) => ipcRenderer.invoke('backup:validate', filePath),
+  backupRestore: (filePath: string) => ipcRenderer.invoke('backup:restore', filePath),
+  backupConnectCloud: () => ipcRenderer.invoke('backup:connectCloud'),
+  backupDisconnectCloud: () => ipcRenderer.invoke('backup:disconnectCloud'),
+  backupOpenFolder: () => ipcRenderer.invoke('backup:openFolder'),
+  backupRetryUploads: () => ipcRenderer.invoke('backup:retryUploads'),
+  backupUpdateSchedule: (data: unknown) => ipcRenderer.invoke('backup:updateSchedule', data),
 };
 
 contextBridge.exposeInMainWorld('api', api);

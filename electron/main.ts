@@ -1,8 +1,14 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpcHandlers } from './ipc';
 import { ensureBootstrap } from './bootstrap';
+import { runMigrations } from './migrator';
+import { backupService } from './backup/backupService';
+import { isRestoreInProgress } from './backup/restoreService';
+import { printService } from './services/printService';
+import prisma from './database/client';
+import { logger } from './logger';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +18,20 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');
 
 let mainWindow: BrowserWindow | null = null;
+let isQuittingGracefully = false;
+
+// Ensure only one instance of the app can access the database at a time.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -40,20 +60,57 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // Ensure the database is usable (admin + settings + sample data) before the
-  // UI loads. Errors here are logged but never block the window from opening.
+  // 1. Run schema migrations before anything else touches the database.
+  try {
+    await runMigrations(prisma);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error('main: migration failed', { error: msg });
+    dialog.showErrorBox(
+      'Database Migration Failed',
+      `The application could not upgrade the database:\n\n${msg}\n\nPlease contact support.`
+    );
+    app.exit(1);
+    return;
+  }
+
+  // 2. Bootstrap default data (admin, settings, sample menu).
   try {
     await ensureBootstrap();
   } catch (err) {
-    console.error('Bootstrap failed:', err);
+    logger.error('main: bootstrap failed', { error: err });
   }
 
+  // 3. Start the backup scheduler.
+  backupService.init(prisma);
+
+  // 4. Register IPC handlers and open the window.
   registerIpcHandlers();
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// Graceful exit: run exit backup, then quit.
+app.on('before-quit', async (event) => {
+  if (isQuittingGracefully) return; // already handled
+  if (isRestoreInProgress()) return; // restore handles its own exit
+
+  event.preventDefault();
+  isQuittingGracefully = true;
+
+  try {
+    await backupService.runExitBackup();
+  } catch (err) {
+    logger.error('main: exit backup failed', { error: err });
+  } finally {
+    backupService.destroy();
+    printService.destroy();
+    await prisma.$disconnect();
+    app.quit();
+  }
 });
 
 app.on('window-all-closed', () => {
