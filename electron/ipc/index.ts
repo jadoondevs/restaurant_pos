@@ -6,6 +6,7 @@ import { registerCustomerHandlers } from './customers';
 import { registerReportHandlers } from './reports';
 import { registerSettingsHandlers } from './settings';
 import { registerPrintHandlers } from './print';
+import { registerBackupHandlers } from './backup';
 
 /** Registers every IPC handler group. Called once on app ready. */
 export function registerIpcHandlers() {
@@ -17,4 +18,5 @@ export function registerIpcHandlers() {
   registerReportHandlers();
   registerSettingsHandlers();
   registerPrintHandlers();
+  registerBackupHandlers();
 }

@@ -16,34 +16,72 @@ interface OrderInput {
   cashReceived?: number;
   tableNumber?: string | null;
   customerId?: number | null;
+  cashierName?: string | null;
 }
 
 interface ListParams {
   search?: string;
   from?: string; // ISO date
-  to?: string; // ISO date
+  to?: string;   // ISO date
   limit?: number;
 }
 
-/** Generates a receipt number like R-20260718-0007 (date + daily sequence). */
-async function nextReceiptNumber(): Promise<string> {
+/**
+ * Atomically allocates the next receipt number for today.
+ * Uses ReceiptCounter with an upsert so numbers are never reused,
+ * even after orders are deleted.
+ * Format: R-YYYYMMDD-0001
+ */
+async function allocateReceiptNumber(): Promise<string> {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  const datePart = `${y}${m}${d}`;
+  const dateKey = `${y}${m}${d}`;
 
-  const start = new Date(y, now.getMonth(), now.getDate());
-  const end = new Date(y, now.getMonth(), now.getDate() + 1);
-  const countToday = await prisma.order.count({
-    where: { createdAt: { gte: start, lt: end } },
+  // Increment the counter atomically inside a transaction.
+  const counter = await prisma.$transaction(async (tx) => {
+    // Upsert: create with lastSeq=1 if not exists, otherwise increment.
+    await tx.$executeRawUnsafe(
+      `INSERT INTO "ReceiptCounter" ("dateKey", "lastSeq")
+       VALUES (?, 1)
+       ON CONFLICT ("dateKey") DO UPDATE SET "lastSeq" = "lastSeq" + 1`,
+      dateKey
+    );
+    const rows = await tx.$queryRawUnsafe<{ lastSeq: number }[]>(
+      `SELECT "lastSeq" FROM "ReceiptCounter" WHERE "dateKey" = ?`,
+      dateKey
+    );
+    return rows[0].lastSeq;
   });
 
-  const seq = String(countToday + 1).padStart(4, '0');
-  return `R-${datePart}-${seq}`;
+  const seq = String(counter).padStart(4, '0');
+  return `R-${y}${m}${d}-${seq}`;
+}
+
+/**
+ * Peeks at the next receipt number without persisting anything.
+ * Used by the renderer to display the receipt number before the user
+ * confirms the sale. The actual allocation happens in orders:create.
+ */
+async function peekReceiptNumber(): Promise<string> {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const dateKey = `${y}${m}${d}`;
+
+  const rows = await prisma.$queryRawUnsafe<{ lastSeq: number }[]>(
+    `SELECT "lastSeq" FROM "ReceiptCounter" WHERE "dateKey" = ?`,
+    dateKey
+  );
+  const next = (rows[0]?.lastSeq ?? 0) + 1;
+  return `R-${y}${m}${d}-${String(next).padStart(4, '0')}`;
 }
 
 export function registerOrderHandlers() {
+  handle('orders:peekReceiptNumber', async () => peekReceiptNumber());
+
   handle('orders:create', async (input: OrderInput) => {
     if (!input.items?.length) throw new Error('Cannot complete an empty order.');
 
@@ -64,49 +102,69 @@ export function registerOrderHandlers() {
     const taxable = subtotal - discount;
     const taxAmount = +(taxable * (taxRate / 100)).toFixed(2);
     const grandTotal = +(taxable + taxAmount).toFixed(2);
-
     const cashReceived = input.cashReceived ?? grandTotal;
     const change = +(Math.max(0, cashReceived - grandTotal)).toFixed(2);
 
-    const receiptNumber = await nextReceiptNumber();
+    // Allocate receipt number and create the order atomically.
+    return prisma.$transaction(async (tx) => {
+      // Allocate receipt number inside the transaction.
+      const now = new Date();
+      const y = now.getFullYear();
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const dy = String(now.getDate()).padStart(2, '0');
+      const dateKey = `${y}${mo}${dy}`;
 
-    return prisma.order.create({
-      data: {
-        receiptNumber,
-        subtotal: +subtotal.toFixed(2),
-        discount: +discount.toFixed(2),
-        taxRate,
-        taxAmount,
-        grandTotal,
-        cashReceived: +cashReceived.toFixed(2),
-        change,
-        tableNumber: input.tableNumber || null,
-        customerId: input.customerId || null,
-        status: 'completed',
-        items: {
-          create: input.items.map((item) => ({
-            menuItemId: item.menuItemId || null,
-            name: item.name,
-            price: item.price,
-            quantity: item.quantity,
-            specialInstructions: item.specialInstructions || null,
-            lineTotal: +(item.price * item.quantity).toFixed(2),
-          })),
+      await tx.$executeRawUnsafe(
+        `INSERT INTO "ReceiptCounter" ("dateKey", "lastSeq")
+         VALUES (?, 1)
+         ON CONFLICT ("dateKey") DO UPDATE SET "lastSeq" = "lastSeq" + 1`,
+        dateKey
+      );
+      const rows = await tx.$queryRawUnsafe<{ lastSeq: number }[]>(
+        `SELECT "lastSeq" FROM "ReceiptCounter" WHERE "dateKey" = ?`,
+        dateKey
+      );
+      const seq = String(rows[0].lastSeq).padStart(4, '0');
+      const receiptNumber = `R-${y}${mo}${dy}-${seq}`;
+
+      return tx.order.create({
+        data: {
+          receiptNumber,
+          subtotal: +subtotal.toFixed(2),
+          discount: +discount.toFixed(2),
+          taxRate,
+          taxAmount,
+          grandTotal,
+          cashReceived: +cashReceived.toFixed(2),
+          change,
+          tableNumber: input.tableNumber || null,
+          customerId: input.customerId || null,
+          cashierName: input.cashierName || null,
+          status: 'completed',
+          items: {
+            create: input.items.map((item) => ({
+              menuItemId: item.menuItemId || null,
+              name: item.name,
+              price: item.price,
+              quantity: item.quantity,
+              specialInstructions: item.specialInstructions || null,
+              lineTotal: +(item.price * item.quantity).toFixed(2),
+            })),
+          },
         },
-      },
-      include: { items: true, customer: true },
+        include: { items: true, customer: true },
+      });
     });
   });
 
   handle('orders:list', async (params: ListParams = {}) => {
-    const where: any = {};
+    const where: Record<string, unknown> = {};
 
     if (params.from || params.to) {
       where.createdAt = {};
-      if (params.from) where.createdAt.gte = new Date(params.from);
-      if (params.to) where.createdAt.lte = new Date(params.to);
+      if (params.from) (where.createdAt as Record<string, unknown>).gte = new Date(params.from);
+      if (params.to) (where.createdAt as Record<string, unknown>).lte = new Date(params.to);
     } else {
-      // Default: today's orders.
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       where.createdAt = { gte: start };
@@ -138,6 +196,8 @@ export function registerOrderHandlers() {
 
   handle('orders:delete', async (id: number) => {
     await prisma.order.delete({ where: { id } });
+    // Note: ReceiptCounter is intentionally NOT decremented.
+    // Deleted orders must never cause receipt number reuse.
     return { success: true };
   });
 }

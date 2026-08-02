@@ -9,6 +9,10 @@ interface SettingsInput {
   currencySymbol?: string;
   receiptFooter?: string;
   darkMode?: boolean;
+  receiptPaperSize?: string;
+  backupSchedule?: string;
+  backupOnExit?: boolean;
+  cloudBackupEnabled?: boolean;
 }
 
 /** Ensures the singleton settings row (id = 1) always exists. */
@@ -27,6 +31,19 @@ export function registerSettingsHandlers() {
     if (data.taxPercentage != null && data.taxPercentage < 0) {
       throw new Error('Tax percentage cannot be negative.');
     }
+    if (
+      data.receiptPaperSize != null &&
+      !['80mm', 'A4'].includes(data.receiptPaperSize)
+    ) {
+      throw new Error('Invalid paper size. Must be "80mm" or "A4".');
+    }
+    if (
+      data.backupSchedule != null &&
+      !['daily', 'weekly', 'manual'].includes(data.backupSchedule)
+    ) {
+      throw new Error('Invalid backup schedule.');
+    }
+
     await ensureSettings();
     return prisma.settings.update({
       where: { id: 1 },
@@ -38,6 +55,10 @@ export function registerSettingsHandlers() {
         currencySymbol: data.currencySymbol?.trim() || '$',
         receiptFooter: data.receiptFooter,
         darkMode: data.darkMode,
+        receiptPaperSize: data.receiptPaperSize,
+        backupSchedule: data.backupSchedule,
+        backupOnExit: data.backupOnExit,
+        cloudBackupEnabled: data.cloudBackupEnabled,
       },
     });
   });
