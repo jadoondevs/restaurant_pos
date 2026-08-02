@@ -25,6 +25,7 @@ export async function ensureBootstrap(): Promise<void> {
   }
 
   // 2) Settings (singleton row id = 1).
+  // upsert with create covers fresh installs; existing rows keep their values.
   await prisma.settings.upsert({
     where: { id: 1 },
     update: {},
@@ -33,6 +34,10 @@ export async function ensureBootstrap(): Promise<void> {
       restaurantName: 'My Restaurant',
       currencySymbol: '$',
       receiptFooter: 'Thank you for dining with us!',
+      receiptPaperSize: '80mm',
+      backupSchedule: 'daily',
+      backupOnExit: true,
+      cloudBackupEnabled: false,
     },
   });
 

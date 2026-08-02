@@ -70,7 +70,10 @@ export async function validateBackup(backupPath: string): Promise<ValidationResu
     );
     const integrityOk = integrityRows.every((r) => r.integrity_check === 'ok');
     if (!integrityOk) {
-      return { valid: false, error: 'Database integrity check failed. The backup may be corrupted.' };
+      return {
+        valid: false,
+        error: 'Database integrity check failed. The backup may be corrupted.',
+      };
     }
 
     // Required tables.
@@ -96,66 +99,86 @@ export async function validateBackup(backupPath: string): Promise<ValidationResu
 // ---------------------------------------------------------------------------
 // Restore — only called after validateBackup() returns { valid: true }.
 // ---------------------------------------------------------------------------
-let isRestoring = false;
+class RestoreService {
+  private restoring = false;
 
-export function isRestoreInProgress(): boolean {
-  return isRestoring;
+  isRestoreInProgress(): boolean {
+    return this.restoring;
+  }
+
+  async restoreBackup(
+    backupPath: string,
+    prisma: PrismaClient
+  ): Promise<void> {
+    if (this.restoring) throw new Error('A restore is already in progress.');
+    this.restoring = true;
+
+    logger.info('restoreService: starting restore', { backupPath });
+
+    // Re-validate immediately before touching anything.
+    const validation = await validateBackup(backupPath);
+    if (!validation.valid) {
+      this.restoring = false;
+      throw new Error(validation.error ?? 'Backup validation failed.');
+    }
+
+    const liveDbPath = getDbPath();
+
+    // 5. Create a safety backup of the current database.
+    const safetyFilename = `safety-before-restore-${Date.now()}.db`;
+    const safetyPath = path.join(getBackupDir(), safetyFilename);
+    try {
+      await prisma.$executeRawUnsafe(`VACUUM INTO '${safetyPath.replace(/'/g, "''")}' `);
+      logger.info('restoreService: safety backup created', { safetyPath });
+    } catch (err) {
+      this.restoring = false;
+      throw new Error(
+        `Failed to create safety backup: ${err instanceof Error ? err.message : err}`
+      );
+    }
+
+    // 6. Disconnect Prisma so the DB file is not locked.
+    await prisma.$disconnect();
+
+    // Remove WAL and SHM sidecar files to ensure a clean swap.
+    for (const ext of ['-wal', '-shm']) {
+      const sidecar = liveDbPath + ext;
+      if (fs.existsSync(sidecar)) {
+        try {
+          fs.unlinkSync(sidecar);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Atomic copy: write to a temp file first, then rename.
+    const tmpPath = liveDbPath + '.restore-tmp';
+    try {
+      fs.copyFileSync(backupPath, tmpPath);
+      fs.renameSync(tmpPath, liveDbPath);
+      logger.info('restoreService: database swapped successfully');
+    } catch (err) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // ignore
+      }
+      throw new Error(
+        `Failed to replace database: ${err instanceof Error ? err.message : err}`
+      );
+    }
+
+    // 7. Restart the application.
+    logger.info('restoreService: restarting application');
+    app.relaunch();
+    app.exit(0);
+  }
 }
 
-export async function restoreBackup(
-  backupPath: string,
-  prisma: PrismaClient
-): Promise<void> {
-  if (isRestoring) throw new Error('A restore is already in progress.');
-  isRestoring = true;
+export const restoreService = new RestoreService();
 
-  logger.info('restoreService: starting restore', { backupPath });
-
-  // Re-validate immediately before touching anything.
-  const validation = await validateBackup(backupPath);
-  if (!validation.valid) {
-    isRestoring = false;
-    throw new Error(validation.error ?? 'Backup validation failed.');
-  }
-
-  const liveDbPath = getDbPath();
-
-  // 5. Create a safety backup of the current database.
-  const safetyFilename = `safety-before-restore-${Date.now()}.db`;
-  const safetyPath = path.join(getBackupDir(), safetyFilename);
-  try {
-    await prisma.$executeRawUnsafe(`VACUUM INTO '${safetyPath.replace(/'/g, "''")}' `);
-    logger.info('restoreService: safety backup created', { safetyPath });
-  } catch (err) {
-    isRestoring = false;
-    throw new Error(`Failed to create safety backup: ${err instanceof Error ? err.message : err}`);
-  }
-
-  // 6. Disconnect Prisma so the DB file is not locked.
-  await prisma.$disconnect();
-
-  // Remove WAL and SHM sidecar files to ensure a clean swap.
-  for (const ext of ['-wal', '-shm']) {
-    const sidecar = liveDbPath + ext;
-    if (fs.existsSync(sidecar)) {
-      try { fs.unlinkSync(sidecar); } catch { /* ignore */ }
-    }
-  }
-
-  // Atomic copy: write to a temp file first, then rename.
-  const tmpPath = liveDbPath + '.restore-tmp';
-  try {
-    fs.copyFileSync(backupPath, tmpPath);
-    fs.renameSync(tmpPath, liveDbPath);
-    logger.info('restoreService: database swapped successfully');
-  } catch (err) {
-    // Attempt to clean up the temp file.
-    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-    throw new Error(`Failed to replace database: ${err instanceof Error ? err.message : err}`);
-  }
-
-  // 7. Restart the application.
-  logger.info('restoreService: restarting application');
-  app.relaunch();
-  app.exit(0);
+/** Convenience re-export for main.ts before-quit guard. */
+export function isRestoreInProgress(): boolean {
+  return restoreService.isRestoreInProgress();
 }
