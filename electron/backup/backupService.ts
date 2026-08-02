@@ -23,7 +23,7 @@ interface BackupSettings {
 
 class BackupService {
   private prisma: PrismaClient | null = null;
-  private running = false; // mutex
+  private running = false;
   private scheduleTimer: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setInterval> | null = null;
   private lastScheduledRun: Date | null = null;
@@ -40,10 +40,18 @@ class BackupService {
   }
 
   destroy(): void {
-    if (this.scheduleTimer) clearInterval(this.scheduleTimer);
-    if (this.retryTimer) clearInterval(this.retryTimer);
-    this.scheduleTimer = null;
-    this.retryTimer = null;
+    if (this.scheduleTimer) {
+      clearInterval(this.scheduleTimer);
+      // unref() so the timer does not keep the Node event loop alive.
+      // (Already cleared, but belt-and-suspenders for any pending tick.)
+      this.scheduleTimer = null;
+    }
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.prisma = null;
+    logger.info('backupService: destroyed');
   }
 
   // ---------------------------------------------------------------------------
@@ -51,7 +59,11 @@ class BackupService {
   // ---------------------------------------------------------------------------
   private startScheduler(): void {
     if (this.scheduleTimer) clearInterval(this.scheduleTimer);
-    this.scheduleTimer = setInterval(() => this.checkSchedule(), 5 * 60 * 1000);
+    const timer = setInterval(() => void this.checkSchedule(), 5 * 60 * 1000);
+    // unref() prevents this timer from keeping the process alive after all
+    // windows are closed and app.quit() has been called.
+    timer.unref();
+    this.scheduleTimer = timer;
   }
 
   private async checkSchedule(): Promise<void> {
@@ -62,7 +74,6 @@ class BackupService {
 
       const now = new Date();
       if (!this.lastScheduledRun) {
-        // On first check, only run if it's past 22:00 local time.
         if (now.getHours() < 22) return;
       } else {
         const msSinceLast = now.getTime() - this.lastScheduledRun.getTime();
@@ -85,7 +96,9 @@ class BackupService {
   // ---------------------------------------------------------------------------
   private startRetryLoop(): void {
     if (this.retryTimer) clearInterval(this.retryTimer);
-    this.retryTimer = setInterval(() => this.retryPendingUploads(), 5 * 60 * 1000);
+    const timer = setInterval(() => void this.retryPendingUploads(), 5 * 60 * 1000);
+    timer.unref();
+    this.retryTimer = timer;
   }
 
   private async retryPendingUploads(): Promise<void> {
@@ -96,7 +109,6 @@ class BackupService {
         orderBy: { createdAt: 'asc' },
         take: 5,
       });
-
       for (const record of pending) {
         await this.uploadRecord(record.id, record.filePath, record.filename);
       }
@@ -121,7 +133,6 @@ class BackupService {
       const local = await createLocalBackup(this.prisma);
       const settings = await this.getSettings();
 
-      // Record the backup in the database.
       const record = await this.prisma.backupRecord.create({
         data: {
           filename: local.filename,
@@ -134,13 +145,8 @@ class BackupService {
 
       let cloudStatus = record.cloudStatus;
 
-      // Attempt cloud upload if enabled.
       if (settings.cloudEnabled) {
-        cloudStatus = await this.uploadRecord(
-          record.id,
-          local.filePath,
-          local.filename
-        );
+        cloudStatus = await this.uploadRecord(record.id, local.filePath, local.filename);
       }
 
       logger.info('backupService: backup complete', { filename: local.filename, cloudStatus });
@@ -150,7 +156,6 @@ class BackupService {
     }
   }
 
-  /** Attempts to upload a backup record. Returns the new cloudStatus. */
   private async uploadRecord(
     recordId: number,
     filePath: string,
@@ -208,7 +213,7 @@ class BackupService {
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers.
+  // Helpers
   // ---------------------------------------------------------------------------
   private async getSettings(): Promise<BackupSettings> {
     if (!this.prisma) return { schedule: 'daily', cloudEnabled: false, backupOnExit: true };
