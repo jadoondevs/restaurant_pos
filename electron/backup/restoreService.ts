@@ -10,10 +10,17 @@
  *   6. Tear down all services (backup scheduler, print service, Prisma).
  *   7. Destroy all BrowserWindows.
  *   8. Atomic file swap (WAL + SHM cleanup).
- *   9. app.relaunch() + app.exit(0).
+ *   9. Release single-instance lock, then app.relaunch() + app.exit(0).
  *
  * The live database is NEVER overwritten before all validation passes.
  * Services are torn down BEFORE the file swap so the DB is fully released.
+ *
+ * IMPORTANT — single-instance lock:
+ *   app.relaunch() spawns the new process immediately. If the old process
+ *   still holds the single-instance lock when the new process starts, the
+ *   new process sees gotLock=false and calls app.quit() — producing a blank
+ *   window that hangs. We must call app.releaseSingleInstanceLock() before
+ *   app.relaunch() so the new process can acquire the lock and start normally.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -136,7 +143,6 @@ class RestoreService {
     }
 
     // --- Step 2: tear down all services before touching the DB file ---
-    // Import lazily to avoid circular dependencies at module load time.
     try {
       const { backupService } = await import('./backupService');
       backupService.destroy();
@@ -156,7 +162,6 @@ class RestoreService {
     }
 
     // --- Step 4: destroy all BrowserWindows ---
-    // This releases any renderer-side DB connections and frees the file lock.
     for (const win of BrowserWindow.getAllWindows()) {
       try {
         if (!win.isDestroyed()) win.destroy();
@@ -179,17 +184,22 @@ class RestoreService {
       logger.info('restoreService: database swapped successfully');
     } catch (err) {
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      // restoring flag stays true — app is in an inconsistent state, must exit.
       throw new Error(
         `Failed to replace database: ${err instanceof Error ? err.message : err}`
       );
     }
 
-    // --- Step 7: relaunch and exit ---
-    // app.relaunch() registers the new process to start after this one exits.
-    // app.exit(0) terminates immediately without firing before-quit again,
-    // so the graceful-shutdown sequence in main.ts does not run concurrently.
-    logger.info('restoreService: relaunching application');
+    // --- Step 7: release lock, relaunch, exit ---
+    //
+    // CRITICAL ORDER:
+    //   1. app.releaseSingleInstanceLock() — frees the lock so the new process
+    //      can acquire it. Without this, the new process sees gotLock=false,
+    //      calls app.quit() immediately, and produces a blank hanging window.
+    //   2. app.relaunch()  — registers the new process to start after exit.
+    //   3. app.exit(0)     — terminates immediately, bypassing before-quit,
+    //      so the graceful-shutdown sequence in main.ts does not run.
+    logger.info('restoreService: releasing lock and relaunching');
+    app.releaseSingleInstanceLock();
     app.relaunch();
     app.exit(0);
   }

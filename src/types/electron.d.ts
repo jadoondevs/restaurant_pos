@@ -1,6 +1,8 @@
 // Ambient declaration for the API exposed by the preload bridge.
 // Every method returns the IpcResult envelope from the main process.
 
+import type { PrintResult } from './index';
+
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export interface ElectronApi {
@@ -45,8 +47,8 @@ export interface ElectronApi {
   settingsGet(): Promise<IpcResult<any>>;
   settingsUpdate(data: unknown): Promise<IpcResult<any>>;
 
-  // Printing
-  printReceipt(html: string): Promise<IpcResult<{ status: string; error?: string }>>;
+  // Printing — status is the literal union from PrintResult, not string.
+  printReceipt(html: string): Promise<IpcResult<PrintResult>>;
 
   // Backup
   backupStatus(): Promise<IpcResult<any>>;
