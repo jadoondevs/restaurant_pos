@@ -4,7 +4,6 @@
  * No googleapis npm package — uses Node's built-in fetch.
  */
 import fs from 'node:fs';
-import path from 'node:path';
 import type { BackupProvider, CloudAccount, RemoteFile, UploadResult } from './contracts';
 import {
   authenticate,
@@ -52,7 +51,6 @@ async function authFetch(
 async function ensureFolder(): Promise<string> {
   const token = await getValidAccessToken();
 
-  // Search for existing folder.
   const q = encodeURIComponent(
     `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
   );
@@ -92,8 +90,7 @@ export class GoogleDriveProvider implements BackupProvider {
   readonly name = 'Google Drive';
 
   async isAuthenticated(): Promise<boolean> {
-    const tokens = loadTokens();
-    return tokens !== null;
+    return loadTokens() !== null;
   }
 
   async getAccount(): Promise<CloudAccount | null> {
@@ -131,12 +128,8 @@ export class GoogleDriveProvider implements BackupProvider {
       const fileBuffer = fs.readFileSync(localPath);
       const fileSize = fileBuffer.length;
 
-      // Use resumable upload for reliability (works for any file size).
       const token = await getValidAccessToken();
-      const metadata = JSON.stringify({
-        name: filename,
-        parents: [folderId],
-      });
+      const metadata = JSON.stringify({ name: filename, parents: [folderId] });
 
       // Initiate resumable upload session.
       const initRes = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=resumable`, {
@@ -151,9 +144,7 @@ export class GoogleDriveProvider implements BackupProvider {
         signal: AbortSignal.timeout(15_000),
       });
 
-      if (!initRes.ok) {
-        throw new Error(`Drive upload init failed: ${initRes.status}`);
-      }
+      if (!initRes.ok) throw new Error(`Drive upload init failed: ${initRes.status}`);
 
       const sessionUri = initRes.headers.get('Location');
       if (!sessionUri) throw new Error('Drive did not return a session URI.');
@@ -166,12 +157,10 @@ export class GoogleDriveProvider implements BackupProvider {
           'Content-Length': String(fileSize),
         },
         body: fileBuffer,
-        signal: AbortSignal.timeout(120_000), // 2 min for large DBs
+        signal: AbortSignal.timeout(120_000),
       });
 
-      if (!uploadRes.ok) {
-        throw new Error(`Drive upload failed: ${uploadRes.status}`);
-      }
+      if (!uploadRes.ok) throw new Error(`Drive upload failed: ${uploadRes.status}`);
 
       const uploaded = (await uploadRes.json()) as { id: string; name: string };
       logger.info('googleDrive: upload complete', { fileId: uploaded.id, filename });
@@ -197,9 +186,7 @@ export class GoogleDriveProvider implements BackupProvider {
 
   async listFiles(): Promise<RemoteFile[]> {
     const folderId = await ensureFolder();
-    const q = encodeURIComponent(
-      `'${folderId}' in parents and trashed=false`
-    );
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
     const res = await authFetch(
       `${DRIVE_FILES_URL}?q=${q}&fields=files(id,name,size,createdTime)&orderBy=createdTime desc&pageSize=50`
     );

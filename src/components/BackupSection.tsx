@@ -134,7 +134,7 @@ export function BackupSection() {
   };
 
   // Restore flow.
-  const openRestoreModal = async () => {
+  const openRestoreModal = () => {
     setSelectedBackup(null);
     setValidationError(null);
     setRestoreOpen(true);
@@ -345,9 +345,7 @@ export function BackupSection() {
             <Button
               variant="danger"
               onClick={confirmRestore}
-              disabled={
-                !selectedBackup || !!validationError || validating || restoring
-              }
+              disabled={!selectedBackup || !!validationError || validating || restoring}
             >
               {restoring ? <Spinner className="h-4 w-4" /> : <RotateCcw size={16} />}
               Restore &amp; Restart

@@ -45,7 +45,7 @@ export function POS() {
 
   // Print-first checkout state.
   const [checkoutIssue, setCheckoutIssue] = useState<CheckoutIssue | null>(null);
-  // Holds the draft receipt data while waiting for user decision after cancel/fail.
+  // Holds the draft receipt while waiting for user decision after cancel/fail.
   const [pendingReceipt, setPendingReceipt] = useState<ReceiptData | null>(null);
 
   // Load categories + customers once.
@@ -466,11 +466,7 @@ export function POS() {
             <Button variant="secondary" onClick={cancelSale}>
               Cancel Sale
             </Button>
-            <Button
-              variant="success"
-              onClick={() => pendingReceipt && completeWithoutPrinting()}
-              disabled={saving}
-            >
+            <Button variant="success" onClick={completeWithoutPrinting} disabled={saving}>
               {saving ? <Spinner className="h-5 w-5" /> : 'Complete Sale'}
             </Button>
           </>
@@ -492,7 +488,7 @@ export function POS() {
             <Button variant="secondary" onClick={cancelSale}>
               Cancel Sale
             </Button>
-            <Button variant="secondary" onClick={() => pendingReceipt && completeWithoutPrinting()} disabled={saving}>
+            <Button variant="secondary" onClick={completeWithoutPrinting} disabled={saving}>
               Complete Without Printing
             </Button>
             <Button variant="primary" onClick={retryPrint} disabled={saving}>

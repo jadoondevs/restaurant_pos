@@ -5,16 +5,21 @@
  *
  *   1. FRESH INSTALL (dev or packaged)
  *      The database file is empty — no tables exist yet.
- *      The migrator initialises the full schema first (prisma db push in dev,
- *      template.db copy in packaged), then stamps user_version = CURRENT_VERSION
- *      so no migration steps run — the fresh schema already satisfies them all.
+ *      The migrator initialises the full schema first, then stamps
+ *      user_version = CURRENT_VERSION so no migration steps run —
+ *      the fresh schema already satisfies them all.
+ *
+ *      Dev:      invokes the local prisma binary (node_modules/.bin/prisma)
+ *                with `db push`. Falls back to npx only if the local binary
+ *                is absent. Never relies on a globally installed Prisma CLI.
+ *      Packaged: copies the bundled prisma/template.db over the empty file.
  *
  *   2. EXISTING DATABASE (upgrade path)
  *      Tables exist, user_version < CURRENT_VERSION.
  *      Only pending migration steps run. Existing data is never touched.
  *
  *   3. UP-TO-DATE DATABASE
- *      user_version === CURRENT_VERSION. Nothing runs.
+ *      user_version === CURRENT_VERSION. Returns immediately.
  *
  *   4. RESTORED BACKUP
  *      Treated as scenario 2 or 3 depending on the backup's schema version.
@@ -34,8 +39,10 @@ import { logger } from './logger';
 const CURRENT_VERSION = 1;
 
 // Core tables that must exist for the app to function.
-// Used to detect a completely uninitialised (fresh) database.
-const CORE_TABLES = ['Admin', 'Settings', 'Category', 'MenuItem', 'Customer', 'Order', 'OrderItem'];
+// Presence of any one of these means the database is not empty.
+const CORE_TABLES = [
+  'Admin', 'Settings', 'Category', 'MenuItem', 'Customer', 'Order', 'OrderItem',
+];
 
 type MigrationStep = {
   version: number;
@@ -73,57 +80,54 @@ async function isDatabaseEmpty(prisma: PrismaClient): Promise<boolean> {
   return true;
 }
 
+/**
+ * Resolves the path to the local prisma CLI binary.
+ * Uses node_modules/.bin/prisma so we never depend on a global install.
+ */
+function resolvePrismaBin(): string {
+  const appRoot = process.env.APP_ROOT ?? process.cwd();
+  const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
+  const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
+  if (fs.existsSync(winBin)) return winBin;
+  if (fs.existsSync(unixBin)) return unixBin;
+  return 'npx prisma'; // fallback: let the shell resolve via PATH
+}
+
 // ---------------------------------------------------------------------------
 // Schema initialisation for a fresh database.
 // ---------------------------------------------------------------------------
-
-/**
- * Initialises a completely empty database with the full current schema.
- *
- * Dev:      runs `prisma db push` against the dev.db file.
- * Packaged: copies the bundled template.db (which was built by prepare-db.mjs
- *           and already contains the full schema) over the empty file.
- *
- * After this call the database has all tables and is ready for use.
- * user_version is then stamped to CURRENT_VERSION so migration steps are
- * skipped — the fresh schema already satisfies every migration.
- */
 async function initialiseSchema(prisma: PrismaClient): Promise<void> {
   if (!app.isPackaged) {
-    // -----------------------------------------------------------------------
-    // Development: use prisma db push to create the schema.
-    // -----------------------------------------------------------------------
-    logger.info('migrator: fresh dev database — running prisma db push');
-
-    // Resolve the dev.db path the same way client.ts does.
+    const appRoot = process.env.APP_ROOT ?? process.cwd();
     const dbUrl = process.env.DATABASE_URL ?? 'file:./prisma/dev.db';
+    const prismaBin = resolvePrismaBin();
 
+    logger.info('migrator: fresh dev database — running prisma db push', { prismaBin });
+
+    // spawnSync is intentional: we must block until the schema is ready.
     const result = spawnSync(
-      'npx',
-      ['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'],
+      prismaBin,
+      ['db', 'push', '--skip-generate', '--accept-data-loss'],
       {
         stdio: 'pipe',
         shell: true,
         env: { ...process.env, DATABASE_URL: dbUrl },
-        cwd: process.env.APP_ROOT ?? process.cwd(),
+        cwd: appRoot,
       }
     );
 
     if (result.status !== 0) {
-      const stderr = result.stderr?.toString() ?? '';
-      const stdout = result.stdout?.toString() ?? '';
+      const stderr = result.stderr?.toString().trim() ?? '';
+      const stdout = result.stdout?.toString().trim() ?? '';
       throw new Error(
-        `prisma db push failed (exit ${result.status}).\n${stderr || stdout}`
+        `prisma db push failed (exit ${result.status ?? 'null'}).\n${
+          stderr || stdout || 'No output captured.'
+        }`
       );
     }
 
     logger.info('migrator: prisma db push succeeded — schema initialised');
   } else {
-    // -----------------------------------------------------------------------
-    // Packaged: copy the bundled template.db over the empty file.
-    // -----------------------------------------------------------------------
-    logger.info('migrator: fresh packaged install — copying template.db');
-
     const templatePath = path.join(process.resourcesPath, 'prisma', 'template.db');
     if (!fs.existsSync(templatePath)) {
       throw new Error(
@@ -132,14 +136,11 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
       );
     }
 
-    // Resolve the live DB path.
     const dbPath = path.join(app.getPath('userData'), 'pos.db');
+    logger.info('migrator: fresh packaged install — copying template.db', { dbPath });
 
-    // Disconnect Prisma before replacing the file.
     await prisma.$disconnect();
     fs.copyFileSync(templatePath, dbPath);
-
-    // Reconnect so subsequent operations work.
     await prisma.$connect();
 
     logger.info('migrator: template.db copied — schema initialised');
@@ -156,7 +157,7 @@ const MIGRATIONS: MigrationStep[] = [
     version: 1,
     description: 'Add Phase-1 columns and tables',
     up: async (prisma) => {
-      // --- Order.cashierName ---
+      // Order.cashierName
       if (!(await columnExists(prisma, 'Order', 'cashierName'))) {
         await prisma.$executeRawUnsafe(
           `ALTER TABLE "Order" ADD COLUMN "cashierName" TEXT`
@@ -164,11 +165,11 @@ const MIGRATIONS: MigrationStep[] = [
         logger.info('migrator: added Order.cashierName');
       }
 
-      // --- Settings new columns ---
+      // Settings new columns
       const settingsCols: [string, string][] = [
-        ['receiptPaperSize', `TEXT NOT NULL DEFAULT '80mm'`],
-        ['backupSchedule',   `TEXT NOT NULL DEFAULT 'daily'`],
-        ['backupOnExit',     `INTEGER NOT NULL DEFAULT 1`],
+        ['receiptPaperSize',   `TEXT NOT NULL DEFAULT '80mm'`],
+        ['backupSchedule',     `TEXT NOT NULL DEFAULT 'daily'`],
+        ['backupOnExit',       `INTEGER NOT NULL DEFAULT 1`],
         ['cloudBackupEnabled', `INTEGER NOT NULL DEFAULT 0`],
       ];
       for (const [col, def] of settingsCols) {
@@ -180,7 +181,7 @@ const MIGRATIONS: MigrationStep[] = [
         }
       }
 
-      // --- ReceiptCounter table ---
+      // ReceiptCounter table
       if (!(await tableExists(prisma, 'ReceiptCounter'))) {
         await prisma.$executeRawUnsafe(`
           CREATE TABLE "ReceiptCounter" (
@@ -191,7 +192,7 @@ const MIGRATIONS: MigrationStep[] = [
         logger.info('migrator: created ReceiptCounter table');
       }
 
-      // --- BackupRecord table ---
+      // BackupRecord table
       if (!(await tableExists(prisma, 'BackupRecord'))) {
         await prisma.$executeRawUnsafe(`
           CREATE TABLE "BackupRecord" (
@@ -233,22 +234,19 @@ async function setUserVersion(prisma: PrismaClient, version: number): Promise<vo
 }
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// Public entry point — called once in main.ts before any IPC handlers.
 // ---------------------------------------------------------------------------
 export async function runMigrations(prisma: PrismaClient): Promise<void> {
-  // Step 1: detect a completely uninitialised database.
   const empty = await isDatabaseEmpty(prisma);
 
   if (empty) {
     logger.info('migrator: database is empty — initialising schema');
     await initialiseSchema(prisma);
-    // Stamp as fully up-to-date: fresh schema satisfies all migrations.
     await setUserVersion(prisma, CURRENT_VERSION);
     logger.info(`migrator: schema initialised and stamped at version ${CURRENT_VERSION}`);
     return;
   }
 
-  // Step 2: existing database — check version and run pending steps.
   const currentVersion = await readUserVersion(prisma);
   logger.info(
     `migrator: existing database at version ${currentVersion}, target ${CURRENT_VERSION}`
