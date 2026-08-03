@@ -1,12 +1,12 @@
 /**
  * Restore service validation tests.
  *
- * Tests the validation pipeline logic without requiring Electron or a real
- * filesystem. We use an in-memory SQLite database written to a temp file
- * to test the actual SQLite header and integrity checks.
+ * Tests the validation pipeline logic without requiring Electron or Prisma.
+ * Uses Node's built-in `node:sqlite` module (Node 22.5+) to create real
+ * SQLite files for header and integrity checks. No native compilation.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,9 +41,10 @@ function validateBackupSync(backupPath: string): ValidationResult {
     return { valid: false, error: 'File is not a valid SQLite database.' };
   }
 
-  const db = new Database(backupPath, { readonly: true });
+  // Open read-only to run integrity check and table verification.
+  const db = new DatabaseSync(backupPath, { readOnly: true });
   try {
-    const rows = db.pragma('integrity_check') as { integrity_check: string }[];
+    const rows = db.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
     if (!rows.every((r) => r.integrity_check === 'ok')) {
       return { valid: false, error: 'Database integrity check failed.' };
     }
@@ -68,7 +69,7 @@ let tmpDir: string;
 
 function createValidBackup(): string {
   const p = path.join(tmpDir, `valid-${Date.now()}.db`);
-  const db = new Database(p);
+  const db = new DatabaseSync(p);
   db.exec(`
     CREATE TABLE Admin (id INTEGER PRIMARY KEY, username TEXT, passwordHash TEXT, createdAt DATETIME, updatedAt DATETIME);
     CREATE TABLE Category (id INTEGER PRIMARY KEY, name TEXT, sortOrder INTEGER, createdAt DATETIME, updatedAt DATETIME);
@@ -78,10 +79,12 @@ function createValidBackup(): string {
     CREATE TABLE OrderItem (id INTEGER PRIMARY KEY, orderId INTEGER, name TEXT, price REAL, quantity INTEGER, lineTotal REAL);
     CREATE TABLE Settings (id INTEGER PRIMARY KEY, restaurantName TEXT, updatedAt DATETIME);
   `);
-  // Insert enough data to exceed 4096 bytes.
+  // Insert enough rows to push the file past 4096 bytes.
   for (let i = 0; i < 50; i++) {
-    db.prepare(`INSERT INTO Admin (username, passwordHash, createdAt, updatedAt) VALUES (?, ?, datetime('now'), datetime('now'))`)
-      .run(`user${i}`, 'hash');
+    db.prepare(
+      `INSERT INTO Admin (username, passwordHash, createdAt, updatedAt)
+       VALUES (?, 'hash', datetime('now'), datetime('now'))`
+    ).run(`user${i}`);
   }
   db.close();
   return p;
@@ -122,7 +125,6 @@ describe('Restore service validation', () => {
 
   it('rejects a file with an invalid SQLite header', () => {
     const p = path.join(tmpDir, 'notadb.db');
-    // Write a file large enough but with wrong header.
     const buf = Buffer.alloc(8192, 0);
     buf.write('NOT A DB', 0, 'utf8');
     fs.writeFileSync(p, buf);
@@ -133,8 +135,7 @@ describe('Restore service validation', () => {
 
   it('rejects a backup missing a required table', () => {
     const p = path.join(tmpDir, 'missing-table.db');
-    const db = new Database(p);
-    // Create all tables except Settings.
+    const db = new DatabaseSync(p);
     db.exec(`
       CREATE TABLE Admin (id INTEGER PRIMARY KEY);
       CREATE TABLE Category (id INTEGER PRIMARY KEY);

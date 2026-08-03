@@ -2,16 +2,17 @@
  * Migration v2 tests.
  *
  * Tests the User table creation and Admin data migration logic
- * using an in-memory SQLite database via better-sqlite3.
+ * using Node's built-in `node:sqlite` module (Node 22.5+).
+ * No native compilation required.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 // ---------------------------------------------------------------------------
-// Replicate migration v2 logic using better-sqlite3 (synchronous API)
+// Replicate migration v2 logic
 // ---------------------------------------------------------------------------
 
-function createUserTable(db: Database.Database): void {
+function createUserTable(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS "User" (
       "id"                 INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +29,7 @@ function createUserTable(db: Database.Database): void {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "User_username_key" ON "User" ("username")`);
 }
 
-function createAdminTable(db: Database.Database): void {
+function createAdminTable(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS "Admin" (
       "id"           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +41,7 @@ function createAdminTable(db: Database.Database): void {
   `);
 }
 
-function tableExists(db: Database.Database, table: string): boolean {
+function tableExists(db: DatabaseSync, table: string): boolean {
   const row = db.prepare(
     `SELECT name FROM sqlite_master WHERE type='table' AND name=?`
   ).get(table);
@@ -48,11 +49,9 @@ function tableExists(db: Database.Database, table: string): boolean {
 }
 
 /** Mirrors migration v2 up() logic */
-function runMigrationV2(db: Database.Database): void {
-  // Step 1: create User table
+function runMigrationV2(db: DatabaseSync): void {
   createUserTable(db);
 
-  // Step 2: migrate Admin rows if Admin table exists
   if (!tableExists(db, 'Admin')) return;
 
   const admins = db.prepare(
@@ -80,10 +79,10 @@ function runMigrationV2(db: Database.Database): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-let db: Database.Database;
+let db: DatabaseSync;
 
 beforeEach(() => {
-  db = new Database(':memory:');
+  db = new DatabaseSync(':memory:');
 });
 
 afterEach(() => {
@@ -106,7 +105,7 @@ describe('Migration v2 — User table creation', () => {
 
   it('User table has the correct columns', () => {
     runMigrationV2(db);
-    const cols = db.pragma('table_info("User")') as { name: string }[];
+    const cols = db.prepare('PRAGMA table_info("User")').all() as { name: string }[];
     const names = cols.map((c) => c.name);
     expect(names).toContain('id');
     expect(names).toContain('username');
@@ -143,7 +142,7 @@ describe('Migration v2 — Admin data migration', () => {
     expect(user.role).toBe('ADMIN');
     expect(user.isActive).toBe(1);
     expect(user.mustChangePassword).toBe(1);
-    expect(user.fullName).toBe('admin'); // defaults to username
+    expect(user.fullName).toBe('admin');
   });
 
   it('preserves the existing password hash exactly', () => {
@@ -168,23 +167,21 @@ describe('Migration v2 — Admin data migration', () => {
     ).run();
 
     runMigrationV2(db);
-    runMigrationV2(db); // second run
+    runMigrationV2(db);
 
-    const count = (db.prepare(`SELECT COUNT(*) as c FROM "User" WHERE username = 'admin'`).get() as { c: number }).c;
-    expect(count).toBe(1);
+    const row = db.prepare(`SELECT COUNT(*) as c FROM "User" WHERE username = 'admin'`).get() as { c: number };
+    expect(row.c).toBe(1);
   });
 
   it('does not overwrite an existing User when Admin has same username', () => {
     createAdminTable(db);
     createUserTable(db);
 
-    // Pre-existing User with a different hash
     db.prepare(
       `INSERT INTO "User" (username, passwordHash, fullName, role, isActive, mustChangePassword)
        VALUES ('admin', '$2b$10$existinghash', 'Admin User', 'ADMIN', 1, 0)`
     ).run();
 
-    // Admin table has same username with different hash
     db.prepare(
       `INSERT INTO Admin (username, passwordHash) VALUES ('admin', '$2b$10$adminhash')`
     ).run();
@@ -195,7 +192,6 @@ describe('Migration v2 — Admin data migration', () => {
       passwordHash: string;
       mustChangePassword: number;
     };
-    // Existing User must be untouched
     expect(user.passwordHash).toBe('$2b$10$existinghash');
     expect(user.mustChangePassword).toBe(0);
   });
@@ -207,17 +203,15 @@ describe('Migration v2 — Admin data migration', () => {
 
     runMigrationV2(db);
 
-    const count = (db.prepare(`SELECT COUNT(*) as c FROM "User"`).get() as { c: number }).c;
-    expect(count).toBe(2);
+    const row = db.prepare(`SELECT COUNT(*) as c FROM "User"`).get() as { c: number };
+    expect(row.c).toBe(2);
   });
 
   it('does nothing when Admin table does not exist (fresh install)', () => {
-    // No Admin table — fresh install scenario
     expect(tableExists(db, 'Admin')).toBe(false);
     runMigrationV2(db);
-    // User table created, but empty
-    const count = (db.prepare(`SELECT COUNT(*) as c FROM "User"`).get() as { c: number }).c;
-    expect(count).toBe(0);
+    const row = db.prepare(`SELECT COUNT(*) as c FROM "User"`).get() as { c: number };
+    expect(row.c).toBe(0);
   });
 
   it('sets role=ADMIN for all migrated Admin rows', () => {

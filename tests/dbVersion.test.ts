@@ -3,17 +3,18 @@
  *
  * Verifies PRAGMA user_version read/write behaviour and the version-gating
  * logic that decides which migrations to run.
+ * Uses Node's built-in `node:sqlite` module (Node 22.5+).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
-function readUserVersion(db: Database.Database): number {
-  const rows = db.pragma('user_version') as { user_version: number }[];
-  return rows[0]?.user_version ?? 0;
+function readUserVersion(db: DatabaseSync): number {
+  const row = db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined;
+  return row?.user_version ?? 0;
 }
 
-function setUserVersion(db: Database.Database, version: number): void {
-  db.pragma(`user_version = ${version}`);
+function setUserVersion(db: DatabaseSync, version: number): void {
+  db.exec(`PRAGMA user_version = ${version}`);
 }
 
 function pendingMigrations(
@@ -23,9 +24,9 @@ function pendingMigrations(
   return migrations.filter((m) => m.version > currentVersion);
 }
 
-let db: Database.Database;
+let db: DatabaseSync;
 
-beforeEach(() => { db = new Database(':memory:'); });
+beforeEach(() => { db = new DatabaseSync(':memory:'); });
 afterEach(() => { db.close(); });
 
 describe('Database version detection', () => {
@@ -64,7 +65,6 @@ describe('Database version detection', () => {
   });
 
   it('handles version higher than known migrations gracefully', () => {
-    // e.g. after a downgrade — no migrations should run.
     const migrations = [{ version: 1 }];
     const pending = pendingMigrations(5, migrations);
     expect(pending).toHaveLength(0);

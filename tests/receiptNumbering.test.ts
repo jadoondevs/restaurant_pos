@@ -1,13 +1,15 @@
 /**
  * Receipt numbering tests.
  *
- * Tests the core receipt-number allocation logic in isolation using an
- * in-memory SQLite database via better-sqlite3 (available as a transitive
- * dependency of Prisma). We replicate the exact SQL used in orders.ts so
- * the tests prove the production logic, not a simplified version.
+ * Tests the core receipt-number allocation logic in isolation using Node's
+ * built-in `node:sqlite` module (available since Node 22.5, stable in
+ * Node 23+). No native compilation required — ships with Node itself.
+ *
+ * We replicate the exact SQL used in orders.ts so the tests prove the
+ * production logic, not a simplified version.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 // ---------------------------------------------------------------------------
 // Helpers that mirror the production logic in electron/ipc/orders.ts
@@ -19,7 +21,7 @@ function dateKey(date: Date): string {
   return `${y}${m}${d}`;
 }
 
-function allocateReceiptNumber(db: Database.Database, date: Date): string {
+function allocateReceiptNumber(db: DatabaseSync, date: Date): string {
   const key = dateKey(date);
   db.prepare(
     `INSERT INTO ReceiptCounter (dateKey, lastSeq)
@@ -35,7 +37,7 @@ function allocateReceiptNumber(db: Database.Database, date: Date): string {
   return `R-${y}${m}${d}-${String(row.lastSeq).padStart(4, '0')}`;
 }
 
-function peekReceiptNumber(db: Database.Database, date: Date): string {
+function peekReceiptNumber(db: DatabaseSync, date: Date): string {
   const key = dateKey(date);
   const row = db.prepare(
     `SELECT lastSeq FROM ReceiptCounter WHERE dateKey = ?`
@@ -50,10 +52,10 @@ function peekReceiptNumber(db: Database.Database, date: Date): string {
 // ---------------------------------------------------------------------------
 // Test setup
 // ---------------------------------------------------------------------------
-let db: Database.Database;
+let db: DatabaseSync;
 
 beforeEach(() => {
-  db = new Database(':memory:');
+  db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE ReceiptCounter (
       dateKey TEXT NOT NULL PRIMARY KEY,
@@ -101,8 +103,6 @@ describe('Receipt numbering', () => {
     const date = new Date('2026-08-02');
     allocateReceiptNumber(db, date); // 0001
     allocateReceiptNumber(db, date); // 0002
-    // Simulate deleting order 0002 — counter is NOT decremented.
-    // Next allocation must be 0003, not 0002.
     const next = allocateReceiptNumber(db, date);
     expect(next).toBe('R-20260802-0003');
   });
@@ -111,7 +111,6 @@ describe('Receipt numbering', () => {
     const date = new Date('2026-08-02');
     const peeked = peekReceiptNumber(db, date);
     expect(peeked).toBe('R-20260802-0001');
-    // Counter must not have advanced.
     const allocated = allocateReceiptNumber(db, date);
     expect(allocated).toBe('R-20260802-0001');
   });
@@ -126,7 +125,6 @@ describe('Receipt numbering', () => {
 
   it('handles concurrent allocations correctly (sequential simulation)', () => {
     const date = new Date('2026-08-02');
-    // Simulate 10 rapid allocations — all must be unique.
     const nums = Array.from({ length: 10 }, () => allocateReceiptNumber(db, date));
     const unique = new Set(nums);
     expect(unique.size).toBe(10);
@@ -144,13 +142,11 @@ describe('Receipt numbering', () => {
     allocateReceiptNumber(db, date); // 0001
     allocateReceiptNumber(db, date); // 0002
 
-    // Simulate restore: wipe the counter table (restored DB had only 0001-0002).
     db.exec(`DELETE FROM ReceiptCounter`);
     db.prepare(
       `INSERT INTO ReceiptCounter (dateKey, lastSeq) VALUES (?, 2)`
     ).run(dateKey(date));
 
-    // Next allocation after restore must be 0003.
     const next = allocateReceiptNumber(db, date);
     expect(next).toBe('R-20260802-0003');
   });

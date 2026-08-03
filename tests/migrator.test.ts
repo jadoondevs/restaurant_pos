@@ -1,46 +1,47 @@
 /**
  * Runtime migrator tests.
  *
- * Uses an in-memory SQLite database to test the migrator logic without
- * Electron or Prisma. We test the helper functions exported from migrator.ts
- * and replicate the migration DDL to verify idempotency.
+ * Uses Node's built-in `node:sqlite` module (Node 22.5+) — no native
+ * compilation required. We replicate the migrator helper logic and DDL
+ * to verify idempotency without Electron or Prisma.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 // ---------------------------------------------------------------------------
-// Replicate migrator helpers using better-sqlite3 (synchronous API)
+// Replicate migrator helpers
 // ---------------------------------------------------------------------------
 const CORE_TABLES = [
   'Admin', 'Settings', 'Category', 'MenuItem', 'Customer', 'Order', 'OrderItem',
 ];
 
-function tableExists(db: Database.Database, table: string): boolean {
+function tableExists(db: DatabaseSync, table: string): boolean {
   const row = db.prepare(
     `SELECT name FROM sqlite_master WHERE type='table' AND name=?`
   ).get(table);
   return row !== undefined;
 }
 
-function columnExists(db: Database.Database, table: string, column: string): boolean {
-  const rows = db.pragma(`table_info("${table}")`) as { name: string }[];
+function columnExists(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[];
   return rows.some((r) => r.name === column);
 }
 
-function isDatabaseEmpty(db: Database.Database): boolean {
+function isDatabaseEmpty(db: DatabaseSync): boolean {
   return CORE_TABLES.every((t) => !tableExists(db, t));
 }
 
-function readUserVersion(db: Database.Database): number {
-  const row = db.pragma('user_version') as { user_version: number }[];
-  return row[0]?.user_version ?? 0;
+function readUserVersion(db: DatabaseSync): number {
+  const row = db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined;
+  return row?.user_version ?? 0;
 }
 
-function setUserVersion(db: Database.Database, version: number): void {
-  db.pragma(`user_version = ${version}`);
+function setUserVersion(db: DatabaseSync, version: number): void {
+  // PRAGMA user_version does not support parameterised queries.
+  db.exec(`PRAGMA user_version = ${version}`);
 }
 
-function createBaseSchema(db: Database.Database): void {
+function createBaseSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS Admin (id INTEGER PRIMARY KEY, username TEXT UNIQUE, passwordHash TEXT, createdAt DATETIME, updatedAt DATETIME);
     CREATE TABLE IF NOT EXISTS Category (id INTEGER PRIMARY KEY, name TEXT UNIQUE, sortOrder INTEGER DEFAULT 0, createdAt DATETIME, updatedAt DATETIME);
@@ -52,7 +53,7 @@ function createBaseSchema(db: Database.Database): void {
   `);
 }
 
-function runMigrationV1(db: Database.Database): void {
+function runMigrationV1(db: DatabaseSync): void {
   if (!columnExists(db, 'Order', 'cashierName')) {
     db.exec(`ALTER TABLE "Order" ADD COLUMN "cashierName" TEXT`);
   }
@@ -90,10 +91,10 @@ function runMigrationV1(db: Database.Database): void {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-let db: Database.Database;
+let db: DatabaseSync;
 
 beforeEach(() => {
-  db = new Database(':memory:');
+  db = new DatabaseSync(':memory:');
 });
 
 afterEach(() => {
@@ -198,10 +199,7 @@ describe('Runtime migrator', () => {
 
   describe('fresh install scenario', () => {
     it('empty database is detected before any DDL runs', () => {
-      // This is the guard that prevented the crash: isDatabaseEmpty() must
-      // return true before we attempt any ALTER TABLE.
       expect(isDatabaseEmpty(db)).toBe(true);
-      // After schema init, it must return false.
       createBaseSchema(db);
       expect(isDatabaseEmpty(db)).toBe(false);
     });
