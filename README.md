@@ -3,6 +3,12 @@
 Fast, simple, reliable desktop Point of Sale system for restaurants.
 Built with Electron, React, Prisma, and SQLite.
 
+## Requirements
+
+- **Node.js 22.5 or later** (required for the built-in `node:sqlite` module
+  used by the test suite)
+- npm 10+
+
 ## Development
 
 ```bash
@@ -46,6 +52,9 @@ without the Vite dev server, which would produce a blank window.
 npm test             # run all tests (Vitest)
 npm run test:watch   # watch mode
 ```
+
+The test suite uses Node's built-in `node:sqlite` module and requires
+**Node.js 22.5 or later**. No native compilation or additional tools needed.
 
 ## Building
 
