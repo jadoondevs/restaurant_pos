@@ -1,8 +1,8 @@
 /**
  * Authentication tests.
  *
- * Tests password hashing, login validation logic, and the default admin
- * bootstrap without requiring Electron or a real database.
+ * Tests password hashing, login validation logic, session validation,
+ * and the default admin bootstrap without requiring Electron or a real database.
  */
 import { describe, it, expect } from 'vitest';
 import bcrypt from 'bcryptjs';
@@ -54,6 +54,20 @@ async function validatePasswordChange(
   const valid = await bcrypt.compare(currentPassword, storedHash);
   if (!valid) throw new Error('Current password is incorrect.');
   return bcrypt.hash(newPassword, 10);
+}
+
+/** Mirrors the session validation logic in AuthContext.tsx */
+function validateStoredSession(
+  raw: string | null
+): { id: number } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { id?: unknown };
+    if (typeof parsed.id !== 'number') return null;
+    return { id: parsed.id };
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +169,6 @@ describe('Login validation', () => {
 
   it('trims whitespace from username before lookup', async () => {
     const user = await makeUser({ username: 'admin' });
-    // The trimmed username matches the stored username
     const result = await validateLogin('  admin  ', 'admin123', user);
     expect(result.username).toBe('admin');
   });
@@ -209,6 +222,31 @@ describe('Password change validation', () => {
   });
 });
 
+describe('Session validation logic', () => {
+  it('returns null when sessionStorage is empty', () => {
+    expect(validateStoredSession(null)).toBeNull();
+  });
+
+  it('returns null for malformed JSON', () => {
+    expect(validateStoredSession('not-json')).toBeNull();
+  });
+
+  it('returns null when id is missing', () => {
+    expect(validateStoredSession(JSON.stringify({ username: 'admin' }))).toBeNull();
+  });
+
+  it('returns null when id is not a number', () => {
+    expect(validateStoredSession(JSON.stringify({ id: 'abc' }))).toBeNull();
+  });
+
+  it('returns the session when id is a valid number', () => {
+    const session = { id: 1, username: 'admin', fullName: 'Administrator', role: 'ADMIN', mustChangePassword: false };
+    const result = validateStoredSession(JSON.stringify(session));
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe(1);
+  });
+});
+
 describe('Default admin bootstrap logic', () => {
   it('default password admin123 verifies correctly', async () => {
     const hash = await bcrypt.hash('admin123', 10);
@@ -229,15 +267,11 @@ describe('Default admin bootstrap logic', () => {
   });
 
   it('mustChangePassword is true for the default admin', () => {
-    // The default admin must always be created with mustChangePassword=true
-    // so the restaurant owner is prompted to set a secure password.
     const mustChange = true;
     expect(mustChange).toBe(true);
   });
 
   it('bootstrap is idempotent — second call would find existing ADMIN and skip', () => {
-    // Simulate the seedDefaultAdmin check:
-    // if existingAdmin !== null, do nothing.
     const existingAdmin = { id: 1, role: 'ADMIN' };
     const shouldSeed = existingAdmin === null;
     expect(shouldSeed).toBe(false);
