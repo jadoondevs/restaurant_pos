@@ -37,7 +37,7 @@ import { app } from 'electron';
 import type { PrismaClient } from '@prisma/client';
 import { logger } from './logger';
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 
 // Core tables that must exist for the app to function.
 // Presence of any one of these means the database is not empty.
@@ -91,11 +91,8 @@ function resolvePrismaBin(): { bin: string; useShell: boolean } {
   const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
   const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
 
-  // On Windows, .cmd files require shell:true to execute.
-  // On Unix, the binary is directly executable with shell:false.
   if (process.platform === 'win32') {
     if (fs.existsSync(winBin)) return { bin: winBin, useShell: true };
-    // Fallback: use cmd.exe with npx
     return { bin: 'npx', useShell: true };
   }
 
@@ -114,8 +111,6 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
 
     logger.info('migrator: fresh dev database — running prisma db push', { bin, useShell });
 
-    // spawnSync is intentional: we must block until the schema is ready
-    // before the rest of the startup sequence continues.
     const result = spawnSync(
       bin,
       ['db', 'push', '--skip-generate', '--accept-data-loss'],
@@ -225,6 +220,79 @@ const MIGRATIONS: MigrationStep[] = [
           `CREATE INDEX "BackupRecord_cloudStatus_idx" ON "BackupRecord" ("cloudStatus")`
         );
         logger.info('migrator: created BackupRecord table');
+      }
+    },
+  },
+  {
+    version: 2,
+    description: 'Add User table and migrate legacy Admin data',
+    up: async (prisma) => {
+      // Step 1: Create the User table if it does not already exist.
+      if (!(await tableExists(prisma, 'User'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "User" (
+            "id"                 INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "username"           TEXT NOT NULL,
+            "passwordHash"       TEXT NOT NULL,
+            "fullName"           TEXT NOT NULL,
+            "role"               TEXT NOT NULL DEFAULT 'CASHIER',
+            "isActive"           INTEGER NOT NULL DEFAULT 1,
+            "mustChangePassword" INTEGER NOT NULL DEFAULT 0,
+            "createdAt"          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt"          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        await prisma.$executeRawUnsafe(
+          `CREATE UNIQUE INDEX "User_username_key" ON "User" ("username")`
+        );
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "User_username_idx" ON "User" ("username")`
+        );
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "User_role_idx" ON "User" ("role")`
+        );
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "User_isActive_idx" ON "User" ("isActive")`
+        );
+        logger.info('migrator: created User table');
+      }
+
+      // Step 2: Migrate legacy Admin rows into User.
+      // Only runs if the Admin table exists (i.e. this is an existing database).
+      // Idempotent: skips any username that already exists in User.
+      if (await tableExists(prisma, 'Admin')) {
+        const admins = await prisma.$queryRawUnsafe<
+          { id: number; username: string; passwordHash: string }[]
+        >(`SELECT "id", "username", "passwordHash" FROM "Admin"`);
+
+        for (const admin of admins) {
+          // Check whether this username already exists in User.
+          const existing = await prisma.$queryRawUnsafe<{ id: number }[]>(
+            `SELECT "id" FROM "User" WHERE "username" = ?`,
+            admin.username
+          );
+
+          if (existing.length === 0) {
+            // Insert preserving the existing password hash.
+            // fullName defaults to username; mustChangePassword=true so the
+            // user is prompted to set a proper name and password on first login.
+            await prisma.$executeRawUnsafe(
+              `INSERT INTO "User" ("username", "passwordHash", "fullName", "role",
+                                   "isActive", "mustChangePassword",
+                                   "createdAt", "updatedAt")
+               VALUES (?, ?, ?, 'ADMIN', 1, 1,
+                       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+              admin.username,
+              admin.passwordHash,
+              admin.username  // fullName = username as a sensible default
+            );
+            logger.info(`migrator: migrated Admin '${admin.username}' → User`);
+          } else {
+            logger.info(
+              `migrator: User '${admin.username}' already exists, skipping Admin migration`
+            );
+          }
+        }
       }
     },
   },
