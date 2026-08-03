@@ -9,10 +9,12 @@
  *      user_version = CURRENT_VERSION so no migration steps run —
  *      the fresh schema already satisfies them all.
  *
- *      Dev:      invokes the local prisma binary (node_modules/.bin/prisma)
- *                with `db push`. Passes an ABSOLUTE DATABASE_URL from
- *                getDatabaseUrl() so the CLI writes to the exact same
- *                location that Prisma Client reads from at runtime.
+ *      Dev:      invokes the local prisma binary. On Windows, cmd.exe is
+ *                invoked directly with shell:false to avoid space-in-path
+ *                tokenisation bugs. On Unix, the binary is exec'd directly.
+ *                Passes an ABSOLUTE DATABASE_URL from getDatabaseUrl() so
+ *                the CLI writes to the exact same location that Prisma
+ *                Client reads from at runtime.
  *      Packaged: copies the bundled prisma/template.db over the empty file.
  *
  *   2. EXISTING DATABASE (upgrade path)
@@ -83,22 +85,51 @@ async function isDatabaseEmpty(prisma: PrismaClient): Promise<boolean> {
 }
 
 /**
- * Resolves the absolute path to the local prisma CLI binary.
- * Returns the full path so spawnSync can be called with shell:false,
- * avoiding cmd.exe on Windows and its spurious cleanup error messages.
+ * Resolves how to invoke the local Prisma CLI binary safely on all platforms.
+ *
+ * Windows:
+ *   .cmd files are batch scripts that require cmd.exe to execute. Using
+ *   shell:true causes Node to construct `cmd.exe /c <path> <args>` as a
+ *   single string, which cmd.exe tokenises by spaces — breaking any path
+ *   that contains spaces (e.g. "C:\Users\Shujahat Jadoon\...").
+ *
+ *   The correct approach (per Node.js child_process docs) is to invoke
+ *   cmd.exe directly as the binary with shell:false, passing the .cmd path
+ *   and its arguments as separate array elements. Node passes each element
+ *   as a distinct argv entry to cmd.exe, so spaces in the path are safe.
+ *
+ *   Returns: { bin: 'cmd.exe', leadArgs: ['/c', '<prisma.cmd path>'], useShell: false }
+ *
+ * Unix:
+ *   The prisma binary is directly executable. shell:false is used.
+ *   Returns: { bin: '<prisma path>', leadArgs: [], useShell: false }
+ *
+ * Fallback (binary not found):
+ *   Falls back to npx with shell:true. This is a last resort and may still
+ *   fail on Windows paths with spaces, but it is only reached if the local
+ *   binary is absent (i.e. node_modules is not installed).
  */
-function resolvePrismaBin(): { bin: string; useShell: boolean } {
+function resolvePrismaBin(): { bin: string; leadArgs: string[]; useShell: boolean } {
   const appRoot = process.env.APP_ROOT ?? process.cwd();
-  const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
-  const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
 
   if (process.platform === 'win32') {
-    if (fs.existsSync(winBin)) return { bin: winBin, useShell: true };
-    return { bin: 'npx', useShell: true };
+    const winBin = path.join(appRoot, 'node_modules', '.bin', 'prisma.cmd');
+    if (fs.existsSync(winBin)) {
+      // Invoke cmd.exe directly with shell:false.
+      // ['/c', winBin] tells cmd.exe to execute the .cmd file.
+      // Each element is a separate argv — spaces in winBin are safe.
+      return { bin: 'cmd.exe', leadArgs: ['/c', winBin], useShell: false };
+    }
+    // Fallback: npx requires shell:true on Windows.
+    return { bin: 'npx', leadArgs: ['prisma'], useShell: true };
   }
 
-  if (fs.existsSync(unixBin)) return { bin: unixBin, useShell: false };
-  return { bin: 'npx', useShell: true };
+  // Unix: execute the binary directly.
+  const unixBin = path.join(appRoot, 'node_modules', '.bin', 'prisma');
+  if (fs.existsSync(unixBin)) {
+    return { bin: unixBin, leadArgs: [], useShell: false };
+  }
+  return { bin: 'npx', leadArgs: ['prisma'], useShell: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +138,7 @@ function resolvePrismaBin(): { bin: string; useShell: boolean } {
 async function initialiseSchema(prisma: PrismaClient): Promise<void> {
   if (!app.isPackaged) {
     const appRoot = process.env.APP_ROOT ?? process.cwd();
-    const { bin, useShell } = resolvePrismaBin();
+    const { bin, leadArgs, useShell } = resolvePrismaBin();
 
     // Always pass an absolute DATABASE_URL to the Prisma CLI subprocess.
     // getDatabaseUrl() is the single source of truth — this guarantees the
@@ -116,13 +147,16 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
 
     logger.info('migrator: fresh dev database — running prisma db push', {
       bin,
+      leadArgs,
       useShell,
       dbUrl: absoluteDbUrl,
     });
 
+    // leadArgs contains any prefix arguments (e.g. ['/c', 'prisma.cmd'] on
+    // Windows). The prisma subcommand arguments follow.
     const result = spawnSync(
       bin,
-      ['db', 'push', '--skip-generate', '--accept-data-loss'],
+      [...leadArgs, 'db', 'push', '--skip-generate', '--accept-data-loss'],
       {
         stdio: 'pipe',
         shell: useShell,
