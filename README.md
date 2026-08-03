@@ -11,6 +11,28 @@ npx prisma db push   # initialise dev database
 npm run dev          # start the app
 ```
 
+### Windows Development Note
+
+When running via:
+
+```
+npm run dev
+```
+
+Windows may print:
+
+```
+ERROR: The process "<pid>" not found.
+```
+
+when the Electron window is closed.
+
+This originates from `vite-plugin-electron`'s cleanup logic
+(`taskkill` on an already exited Electron child process).
+
+It is harmless, development-only, and does not occur
+in packaged builds.
+
 ## Testing
 
 ```bash
