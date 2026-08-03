@@ -9,8 +9,10 @@ const api = {
   // Auth
   login: (username: string, password: string) =>
     ipcRenderer.invoke('auth:login', { username, password }),
-  changePassword: (currentPassword: string, newPassword: string) =>
-    ipcRenderer.invoke('auth:changePassword', { currentPassword, newPassword }),
+  currentUser: (id: number) =>
+    ipcRenderer.invoke('auth:currentUser', id),
+  changePassword: (userId: number, currentPassword: string, newPassword: string) =>
+    ipcRenderer.invoke('auth:changePassword', { userId, currentPassword, newPassword }),
 
   // Categories
   categoriesList: () => ipcRenderer.invoke('categories:list'),

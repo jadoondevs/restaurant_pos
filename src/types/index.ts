@@ -1,9 +1,28 @@
 // Shared domain types used across the renderer.
 
-export interface Admin {
+// ---------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------
+
+/** Role values for the User model. */
+export type UserRole = 'ADMIN' | 'CASHIER';
+
+/**
+ * The authenticated user session payload.
+ * Replaces the legacy Admin interface.
+ * Returned by auth:login and auth:currentUser IPC channels.
+ */
+export interface AuthUser {
   id: number;
   username: string;
+  fullName: string;
+  role: UserRole;
+  mustChangePassword: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Menu & Categories
+// ---------------------------------------------------------------------------
 
 export interface Category {
   id: number;
@@ -22,6 +41,10 @@ export interface MenuItem {
   categoryId: number;
   category?: Category;
 }
+
+// ---------------------------------------------------------------------------
+// Customers & Orders
+// ---------------------------------------------------------------------------
 
 export interface Customer {
   id: number;
@@ -60,6 +83,10 @@ export interface Order {
   createdAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
 export interface Settings {
   id: number;
   restaurantName: string;
@@ -74,6 +101,10 @@ export interface Settings {
   backupOnExit: boolean;
   cloudBackupEnabled: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
 
 export interface DashboardStats {
   todaySales: number;
@@ -98,7 +129,11 @@ export interface TopItem {
   revenue: number;
 }
 
-// A line item in the in-memory POS cart (before an order is saved).
+// ---------------------------------------------------------------------------
+// Cart
+// ---------------------------------------------------------------------------
+
+/** A line item in the in-memory POS cart (before an order is saved). */
 export interface CartItem {
   menuItemId: number;
   name: string;
@@ -107,19 +142,27 @@ export interface CartItem {
   specialInstructions?: string;
 }
 
-// Result returned by the print IPC handler.
+// ---------------------------------------------------------------------------
+// Printing
+// ---------------------------------------------------------------------------
+
+/** Result returned by the print IPC handler. */
 export interface PrintResult {
   status: 'printed' | 'cancelled' | 'failed';
   error?: string;
 }
 
-// Cloud account info.
+// ---------------------------------------------------------------------------
+// Backup
+// ---------------------------------------------------------------------------
+
+/** Cloud account info. */
 export interface CloudAccount {
   email: string;
   displayName: string;
 }
 
-// Backup status returned by backup:status IPC.
+/** Backup status returned by backup:status IPC. */
 export interface BackupStatus {
   cloudConnected: boolean;
   cloudAccount: CloudAccount | null;
@@ -136,7 +179,7 @@ export interface BackupStatus {
   isRunning: boolean;
 }
 
-// A local backup file entry.
+/** A local backup file entry. */
 export interface BackupRecord {
   filename: string;
   filePath: string;
@@ -144,7 +187,11 @@ export interface BackupRecord {
   createdAt: string;
 }
 
-// Data needed to render a receipt — works for both saved orders and drafts.
+// ---------------------------------------------------------------------------
+// Receipt
+// ---------------------------------------------------------------------------
+
+/** Data needed to render a receipt — works for both saved orders and drafts. */
 export interface ReceiptData {
   receiptNumber: string;
   createdAt: string; // ISO string

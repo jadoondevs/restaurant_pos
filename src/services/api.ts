@@ -1,4 +1,5 @@
 import type {
+  AuthUser,
   Category,
   MenuItem,
   Order,
@@ -26,9 +27,11 @@ async function unwrap<T>(promise: Promise<IpcResult<T>>): Promise<T> {
 export const api = {
   // Auth
   login: (username: string, password: string) =>
-    unwrap(window.api.login(username, password)),
-  changePassword: (current: string, next: string) =>
-    unwrap(window.api.changePassword(current, next)),
+    unwrap<AuthUser>(window.api.login(username, password)),
+  currentUser: (id: number) =>
+    unwrap<AuthUser>(window.api.currentUser(id)),
+  changePassword: (userId: number, current: string, next: string) =>
+    unwrap(window.api.changePassword(userId, current, next)),
 
   // Categories
   listCategories: () => unwrap<Category[]>(window.api.categoriesList()),
