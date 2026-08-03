@@ -11,27 +11,34 @@ npx prisma db push   # initialise dev database
 npm run dev          # start the app
 ```
 
-### Windows Development Note
+## Development Notes
 
-When running via:
+### Windows: vite-plugin-electron PID message
 
-```
-npm run dev
-```
-
-Windows may print:
+When running via `npm run dev`, closing the Electron window may print:
 
 ```
 ERROR: The process "<pid>" not found.
 ```
 
-when the Electron window is closed.
+This originates from `vite-plugin-electron`'s cleanup logic — it calls
+`taskkill` on the Electron child process after it exits. If Electron has
+already exited cleanly before `taskkill` runs, Windows prints this message.
 
-This originates from `vite-plugin-electron`'s cleanup logic
-(`taskkill` on an already exited Electron child process).
+**It is harmless, development-only, and does not occur in packaged builds.**
+Using `Ctrl+C` in the terminal instead avoids it entirely.
 
-It is harmless, development-only, and does not occur
-in packaged builds.
+### Restore & Restart in development
+
+The **Restore & Restart** feature behaves differently in dev vs packaged:
+
+- **Packaged `.exe`**: restores the database and automatically relaunches
+  the application.
+- **`npm run dev`**: restores the database, shows a dialog, then exits.
+  Restart manually with `npm run dev`.
+
+This is by design. `app.relaunch()` relaunches the raw Electron binary
+without the Vite dev server, which would produce a blank window.
 
 ## Testing
 

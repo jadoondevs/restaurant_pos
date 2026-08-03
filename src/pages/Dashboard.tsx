@@ -6,8 +6,7 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { formatCurrency } from '@/utils/format';
 import { StatCard, Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { PageLoader } from '@/components/ui/Misc';
-import { PageHeader } from '@/components/ui/Misc';
+import { PageHeader, PageLoader } from '@/components/ui/Misc';
 import type { DashboardStats } from '@/types';
 
 export function Dashboard() {
