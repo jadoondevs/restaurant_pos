@@ -10,9 +10,9 @@
  *      the fresh schema already satisfies them all.
  *
  *      Dev:      invokes the local prisma binary (node_modules/.bin/prisma)
- *                with `db push`. Uses shell:false with the resolved absolute
- *                path so cmd.exe is never involved (avoids spurious Windows
- *                "process not found" errors from cmd.exe cleanup).
+ *                with `db push`. Passes an absolute DATABASE_URL derived
+ *                from getDbPath() so the CLI writes to the same location
+ *                that Prisma Client reads from at runtime.
  *      Packaged: copies the bundled prisma/template.db over the empty file.
  *
  *   2. EXISTING DATABASE (upgrade path)
@@ -36,6 +36,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { PrismaClient } from '@prisma/client';
 import { logger } from './logger';
+import { getDbPath } from './paths';
 
 const CURRENT_VERSION = 2;
 
@@ -106,10 +107,18 @@ function resolvePrismaBin(): { bin: string; useShell: boolean } {
 async function initialiseSchema(prisma: PrismaClient): Promise<void> {
   if (!app.isPackaged) {
     const appRoot = process.env.APP_ROOT ?? process.cwd();
-    const dbUrl = process.env.DATABASE_URL ?? 'file:./prisma/dev.db';
     const { bin, useShell } = resolvePrismaBin();
 
-    logger.info('migrator: fresh dev database — running prisma db push', { bin, useShell });
+    // Use an absolute DATABASE_URL so the Prisma CLI writes to the exact
+    // same location that Prisma Client reads from at runtime.
+    // getDbPath() is the single source of truth for the dev DB location.
+    const absoluteDbUrl = `file:${getDbPath()}`;
+
+    logger.info('migrator: fresh dev database — running prisma db push', {
+      bin,
+      useShell,
+      dbUrl: absoluteDbUrl,
+    });
 
     const result = spawnSync(
       bin,
@@ -117,7 +126,7 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
       {
         stdio: 'pipe',
         shell: useShell,
-        env: { ...process.env, DATABASE_URL: dbUrl },
+        env: { ...process.env, DATABASE_URL: absoluteDbUrl },
         cwd: appRoot,
       }
     );
@@ -258,24 +267,18 @@ const MIGRATIONS: MigrationStep[] = [
       }
 
       // Step 2: Migrate legacy Admin rows into User.
-      // Only runs if the Admin table exists (i.e. this is an existing database).
-      // Idempotent: skips any username that already exists in User.
       if (await tableExists(prisma, 'Admin')) {
         const admins = await prisma.$queryRawUnsafe<
           { id: number; username: string; passwordHash: string }[]
         >(`SELECT "id", "username", "passwordHash" FROM "Admin"`);
 
         for (const admin of admins) {
-          // Check whether this username already exists in User.
           const existing = await prisma.$queryRawUnsafe<{ id: number }[]>(
             `SELECT "id" FROM "User" WHERE "username" = ?`,
             admin.username
           );
 
           if (existing.length === 0) {
-            // Insert preserving the existing password hash.
-            // fullName defaults to username; mustChangePassword=true so the
-            // user is prompted to set a proper name and password on first login.
             await prisma.$executeRawUnsafe(
               `INSERT INTO "User" ("username", "passwordHash", "fullName", "role",
                                    "isActive", "mustChangePassword",
@@ -284,7 +287,7 @@ const MIGRATIONS: MigrationStep[] = [
                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
               admin.username,
               admin.passwordHash,
-              admin.username  // fullName = username as a sensible default
+              admin.username
             );
             logger.info(`migrator: migrated Admin '${admin.username}' → User`);
           } else {

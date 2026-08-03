@@ -2,17 +2,29 @@ import { PrismaClient } from '@prisma/client';
 import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { getDbPath } from '../paths';
 
 /**
  * Creates a single shared Prisma client.
  *
- * In development the SQLite file lives in the project's prisma/ folder.
- * In a packaged build it is copied to the user's writable app-data dir so
- * the database is persistent and writable outside the read-only app bundle.
+ * Database path resolution:
+ *
+ *   Development:
+ *     Uses getDbPath() which returns an absolute path based on APP_ROOT.
+ *     This is the single source of truth — we do NOT use DATABASE_URL at
+ *     runtime because Prisma Client and the Prisma CLI resolve relative
+ *     file: paths differently (CLI resolves relative to prisma/, Client
+ *     resolves relative to process.cwd()), which causes path mismatches.
+ *
+ *   Packaged build:
+ *     Database lives in userData/pos.db. Copied from template.db on first
+ *     launch if it does not exist.
  */
 function resolveDatabaseUrl(): string {
   if (!app.isPackaged) {
-    return process.env.DATABASE_URL ?? 'file:./prisma/dev.db';
+    // Use an absolute path so Prisma Client always opens the correct file
+    // regardless of process.cwd(). getDbPath() is the single source of truth.
+    return `file:${getDbPath()}`;
   }
 
   const userDataDir = app.getPath('userData');
