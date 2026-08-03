@@ -11,8 +11,6 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  // Shown after a successful login when mustChangePassword is true.
-  const [showPasswordWarning, setShowPasswordWarning] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -20,9 +18,6 @@ export function Login() {
     setLoading(true);
     try {
       await login(username, password);
-      // login() sets the user in context; if mustChangePassword is true,
-      // show a non-blocking warning. The user can dismiss it and continue.
-      // (Forced password change is out of scope for Milestone 1.)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {
@@ -30,12 +25,11 @@ export function Login() {
     }
   };
 
-  // After login the AuthContext user is set; App.tsx will render the app.
-  // We show the warning here only if the component is still mounted
-  // (i.e. the user just logged in and mustChangePassword is true).
-  // In practice App.tsx re-renders immediately, so this is a brief flash.
-  // The warning is also shown in the Navbar for logged-in users.
-  const mustChange = user?.mustChangePassword ?? showPasswordWarning;
+  // mustChangePassword comes from AuthContext (set at login and refreshed
+  // after a password change). The Navbar shows the persistent warning banner
+  // for logged-in users; this banner is shown briefly on the Login screen
+  // if the component is still mounted after a successful login.
+  const mustChange = user?.mustChangePassword ?? false;
 
   return (
     <div className="flex h-screen items-center justify-center bg-slate-100 dark:bg-slate-950">
