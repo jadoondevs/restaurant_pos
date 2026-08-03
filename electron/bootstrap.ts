@@ -1,5 +1,5 @@
 import prisma from './database/client';
-import bcrypt from 'bcryptjs';
+import { seedDefaultAdmin } from './auth/seedDefaultAdmin';
 
 /**
  * Runtime bootstrap for the PACKAGED app.
@@ -10,19 +10,15 @@ import bcrypt from 'bcryptjs';
  *
  * This function then guarantees the app is usable by ensuring the required
  * rows exist:
- *   - a default admin account (admin / admin123)
+ *   - a default admin account in the User table (admin / admin123)
  *   - the singleton settings row
  *   - example categories/items on a brand-new database (convenience only)
  *
  * It is safe to run on every launch — it never overwrites existing data.
  */
 export async function ensureBootstrap(): Promise<void> {
-  // 1) Admin account.
-  const adminCount = await prisma.admin.count();
-  if (adminCount === 0) {
-    const passwordHash = await bcrypt.hash('admin123', 10);
-    await prisma.admin.create({ data: { username: 'admin', passwordHash } });
-  }
+  // 1) Default admin user (authentication uses the User table, not Admin).
+  await seedDefaultAdmin(prisma);
 
   // 2) Settings (singleton row id = 1).
   // upsert with create covers fresh installs; existing rows keep their values.
