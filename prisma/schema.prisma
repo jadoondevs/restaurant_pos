@@ -10,13 +10,40 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Single administrator account used to log in.
+// ---------------------------------------------------------------------------
+// LEGACY MODEL — Admin
+// Authentication no longer uses this table.
+// Retained temporarily for backward compatibility with Phase 1 databases.
+// Migration v2 copies all Admin rows into the User table.
+// Scheduled for removal in a future migration once the system is stable.
+// Do NOT insert, update, or query this table in application code.
+// ---------------------------------------------------------------------------
 model Admin {
   id           Int      @id @default(autoincrement())
   username     String   @unique
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// User — the single source of truth for authentication (Phase 2+).
+// role values: 'ADMIN' | 'CASHIER'
+// ---------------------------------------------------------------------------
+model User {
+  id                 Int      @id @default(autoincrement())
+  username           String   @unique
+  passwordHash       String
+  fullName           String
+  role               String   @default("CASHIER")
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([username])
+  @@index([role])
+  @@index([isActive])
 }
 
 // Menu categories (Burgers, Pizza, Drinks, ...).
@@ -78,7 +105,7 @@ model Order {
   cashReceived  Float       @default(0)
   change        Float       @default(0)
   tableNumber   String?
-  cashierName   String?     // name of the logged-in cashier at time of sale
+  cashierName   String?     // fullName of the logged-in user at time of sale
   status        String      @default("completed") // completed | active
   customerId    Int?
   customer      Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
