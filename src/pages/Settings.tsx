@@ -14,7 +14,7 @@ import type { Settings as SettingsType } from '@/types';
 
 export function Settings() {
   const { settings, update } = useSettings();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { toast } = useToast();
 
   const [form, setForm] = useState<SettingsType | null>(null);
@@ -59,9 +59,14 @@ export function Settings() {
     if (newPw.length < 6) return toast('New password must be at least 6 characters.', 'error');
     if (newPw !== confirmPw) return toast('Passwords do not match.', 'error');
     try {
-      // Pass the authenticated user's id so the IPC handler knows which
-      // User row to update. This replaces the old Admin-based approach.
       await api.changePassword(user.id, currentPw, newPw);
+
+      // Fetch the updated user from the DB so mustChangePassword=false
+      // is reflected in AuthContext immediately. The warning banner
+      // disappears without requiring logout/login.
+      const fresh = await api.currentUser(user.id);
+      refreshUser(fresh);
+
       toast('Password changed.', 'success');
       setPwOpen(false);
       setCurrentPw('');

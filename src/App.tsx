@@ -14,10 +14,13 @@ import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, validating } = useAuth();
   const { loading } = useSettings();
 
-  if (loading) return <PageLoader />;
+  // Show a loader while the session is being validated against the DB
+  // or while settings are loading. This prevents a flash of the Login
+  // screen for users with a valid existing session.
+  if (validating || loading) return <PageLoader />;
   if (!user) return <Login />;
 
   return (
