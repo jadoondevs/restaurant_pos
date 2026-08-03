@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Save, KeyRound } from 'lucide-react';
 import { api } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
 import { Card } from '@/components/ui/Card';
@@ -13,6 +14,7 @@ import type { Settings as SettingsType } from '@/types';
 
 export function Settings() {
   const { settings, update } = useSettings();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const [form, setForm] = useState<SettingsType | null>(null);
@@ -53,10 +55,13 @@ export function Settings() {
   };
 
   const changePassword = async () => {
+    if (!user) return;
     if (newPw.length < 6) return toast('New password must be at least 6 characters.', 'error');
     if (newPw !== confirmPw) return toast('Passwords do not match.', 'error');
     try {
-      await api.changePassword(currentPw, newPw);
+      // Pass the authenticated user's id so the IPC handler knows which
+      // User row to update. This replaces the old Admin-based approach.
+      await api.changePassword(user.id, currentPw, newPw);
       toast('Password changed.', 'success');
       setPwOpen(false);
       setCurrentPw('');
@@ -171,7 +176,14 @@ export function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Security</h2>
-              <p className="text-sm text-slate-500">Change your admin password.</p>
+              <p className="text-sm text-slate-500">
+                Signed in as <span className="font-medium">{user?.fullName}</span>
+                {user?.role === 'ADMIN' && (
+                  <span className="ml-2 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                    Admin
+                  </span>
+                )}
+              </p>
             </div>
             <Button variant="secondary" onClick={() => setPwOpen(true)}>
               <KeyRound size={18} /> Change Password

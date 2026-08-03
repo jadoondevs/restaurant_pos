@@ -129,6 +129,8 @@ export function POS() {
       const receiptNumber = await api.peekReceiptNumber();
 
       // 2. Build the draft receipt.
+      // cashierName comes from the authenticated user's fullName.
+      // This is the only place cashierName is set — never from arbitrary input.
       const cashAmt = parseFloat(cashReceived) || cart.totals.grandTotal;
       const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
@@ -136,7 +138,7 @@ export function POS() {
         receiptNumber,
         createdAt: new Date().toISOString(),
         tableNumber: tableNumber || null,
-        cashierName: user?.username ?? null,
+        cashierName: user?.fullName ?? null,
         customer: selectedCustomer,
         items: cart.items.map((i) => ({
           name: i.name,
@@ -159,14 +161,11 @@ export function POS() {
       const printResult = await api.printReceipt(html);
 
       if (printResult.status === 'printed') {
-        // 4a. Print succeeded — save the order.
         await commitSale(receiptData);
       } else if (printResult.status === 'cancelled') {
-        // 4b. User cancelled the print dialog.
         setPendingReceipt(receiptData);
         setCheckoutIssue({ kind: 'cancelled' });
       } else {
-        // 4c. Print failed.
         setPendingReceipt(receiptData);
         setCheckoutIssue({ kind: 'failed', error: printResult.error ?? 'Unknown print error.' });
       }
@@ -177,9 +176,6 @@ export function POS() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Retry print from the issue dialog.
-  // ---------------------------------------------------------------------------
   const retryPrint = async () => {
     if (!pendingReceipt || !settings) return;
     setSaving(true);
@@ -200,7 +196,6 @@ export function POS() {
     }
   };
 
-  // Complete sale without printing.
   const completeWithoutPrinting = async () => {
     if (!pendingReceipt) return;
     setSaving(true);
@@ -213,7 +208,6 @@ export function POS() {
     }
   };
 
-  // Cancel the sale entirely — nothing is written to the DB.
   const cancelSale = () => {
     setCheckoutIssue(null);
     setPendingReceipt(null);
