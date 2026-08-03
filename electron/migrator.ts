@@ -10,9 +10,9 @@
  *      the fresh schema already satisfies them all.
  *
  *      Dev:      invokes the local prisma binary (node_modules/.bin/prisma)
- *                with `db push`. Passes an absolute DATABASE_URL derived
- *                from getDbPath() so the CLI writes to the same location
- *                that Prisma Client reads from at runtime.
+ *                with `db push`. Passes an ABSOLUTE DATABASE_URL from
+ *                getDatabaseUrl() so the CLI writes to the exact same
+ *                location that Prisma Client reads from at runtime.
  *      Packaged: copies the bundled prisma/template.db over the empty file.
  *
  *   2. EXISTING DATABASE (upgrade path)
@@ -36,7 +36,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { PrismaClient } from '@prisma/client';
 import { logger } from './logger';
-import { getDbPath } from './paths';
+import { getDatabaseUrl } from './paths';
 
 const CURRENT_VERSION = 2;
 
@@ -109,10 +109,10 @@ async function initialiseSchema(prisma: PrismaClient): Promise<void> {
     const appRoot = process.env.APP_ROOT ?? process.cwd();
     const { bin, useShell } = resolvePrismaBin();
 
-    // Use an absolute DATABASE_URL so the Prisma CLI writes to the exact
-    // same location that Prisma Client reads from at runtime.
-    // getDbPath() is the single source of truth for the dev DB location.
-    const absoluteDbUrl = `file:${getDbPath()}`;
+    // Always pass an absolute DATABASE_URL to the Prisma CLI subprocess.
+    // getDatabaseUrl() is the single source of truth — this guarantees the
+    // CLI writes to the exact same file that Prisma Client reads at runtime.
+    const absoluteDbUrl = getDatabaseUrl();
 
     logger.info('migrator: fresh dev database — running prisma db push', {
       bin,
@@ -267,6 +267,8 @@ const MIGRATIONS: MigrationStep[] = [
       }
 
       // Step 2: Migrate legacy Admin rows into User.
+      // Only runs if the Admin table exists (i.e. this is an existing database).
+      // Idempotent: skips any username that already exists in User.
       if (await tableExists(prisma, 'Admin')) {
         const admins = await prisma.$queryRawUnsafe<
           { id: number; username: string; passwordHash: string }[]

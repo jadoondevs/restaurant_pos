@@ -2,29 +2,22 @@ import { PrismaClient } from '@prisma/client';
 import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getDbPath } from '../paths';
+import { getDatabaseUrl } from '../paths';
 
 /**
  * Creates a single shared Prisma client.
  *
- * Database path resolution:
+ * Database URL resolution:
+ *   getDatabaseUrl() in paths.ts is the single source of truth.
+ *   It always returns an absolute file: URL, eliminating the CLI/runtime
+ *   path divergence that caused SQLite Error 14.
  *
- *   Development:
- *     Uses getDbPath() which returns an absolute path based on APP_ROOT.
- *     This is the single source of truth — we do NOT use DATABASE_URL at
- *     runtime because Prisma Client and the Prisma CLI resolve relative
- *     file: paths differently (CLI resolves relative to prisma/, Client
- *     resolves relative to process.cwd()), which causes path mismatches.
- *
- *   Packaged build:
- *     Database lives in userData/pos.db. Copied from template.db on first
- *     launch if it does not exist.
+ *   See paths.ts for the full explanation of why relative DATABASE_URL
+ *   values are not used at runtime.
  */
 function resolveDatabaseUrl(): string {
   if (!app.isPackaged) {
-    // Use an absolute path so Prisma Client always opens the correct file
-    // regardless of process.cwd(). getDbPath() is the single source of truth.
-    return `file:${getDbPath()}`;
+    return getDatabaseUrl();
   }
 
   const userDataDir = app.getPath('userData');
@@ -41,7 +34,7 @@ function resolveDatabaseUrl(): string {
     }
   }
 
-  return `file:${dbPath}`;
+  return getDatabaseUrl();
 }
 
 const prisma = new PrismaClient({
