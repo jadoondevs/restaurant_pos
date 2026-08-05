@@ -21,6 +21,25 @@ export interface AuthUser {
 }
 
 // ---------------------------------------------------------------------------
+// User management
+// ---------------------------------------------------------------------------
+
+/**
+ * Safe user record returned by users:* IPC channels.
+ * Never includes passwordHash.
+ */
+export interface UserRecord {
+  id: number;
+  username: string;
+  fullName: string;
+  role: UserRole;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Menu & Categories
 // ---------------------------------------------------------------------------
 

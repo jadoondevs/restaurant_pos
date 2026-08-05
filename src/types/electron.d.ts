@@ -1,7 +1,7 @@
 // Ambient declaration for the API exposed by the preload bridge.
 // Every method returns the IpcResult envelope from the main process.
 
-import type { AuthUser, PrintResult } from './index';
+import type { AuthUser, PrintResult, UserRecord } from './index';
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -18,6 +18,28 @@ export interface ElectronApi {
     currentPassword: string,
     newPassword: string
   ): Promise<IpcResult<{ success: boolean }>>;
+
+  // User management (ADMIN only)
+  usersList(): Promise<IpcResult<UserRecord[]>>;
+  usersCreate(data: {
+    username: string;
+    fullName: string;
+    role: string;
+    initialPassword: string;
+  }): Promise<IpcResult<UserRecord>>;
+  usersUpdate(data: {
+    id: number;
+    fullName: string;
+    role: string;
+  }): Promise<IpcResult<UserRecord>>;
+  usersSetActive(data: {
+    id: number;
+    isActive: boolean;
+  }): Promise<IpcResult<UserRecord>>;
+  usersResetPassword(data: {
+    id: number;
+    newPassword: string;
+  }): Promise<IpcResult<{ success: boolean }>>;
 
   // Categories
   categoriesList(): Promise<IpcResult<any[]>>;

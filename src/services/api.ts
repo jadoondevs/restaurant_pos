@@ -1,5 +1,6 @@
 import type {
   AuthUser,
+  UserRecord,
   Category,
   MenuItem,
   Order,
@@ -34,6 +35,18 @@ export const api = {
     unwrap(window.api.logout()),
   changePassword: (userId: number, current: string, next: string) =>
     unwrap(window.api.changePassword(userId, current, next)),
+
+  // User management
+  listUsers: () =>
+    unwrap<UserRecord[]>(window.api.usersList()),
+  createUser: (data: { username: string; fullName: string; role: string; initialPassword: string }) =>
+    unwrap<UserRecord>(window.api.usersCreate(data)),
+  updateUser: (data: { id: number; fullName: string; role: string }) =>
+    unwrap<UserRecord>(window.api.usersUpdate(data)),
+  setUserActive: (id: number, isActive: boolean) =>
+    unwrap<UserRecord>(window.api.usersSetActive({ id, isActive })),
+  resetUserPassword: (id: number, newPassword: string) =>
+    unwrap<{ success: boolean }>(window.api.usersResetPassword({ id, newPassword })),
 
   // Categories
   listCategories: () => unwrap<Category[]>(window.api.categoriesList()),

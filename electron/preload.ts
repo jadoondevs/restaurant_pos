@@ -16,6 +16,18 @@ const api = {
   changePassword: (userId: number, currentPassword: string, newPassword: string) =>
     ipcRenderer.invoke('auth:changePassword', { userId, currentPassword, newPassword }),
 
+  // User management (ADMIN only)
+  usersList: () =>
+    ipcRenderer.invoke('users:list'),
+  usersCreate: (data: unknown) =>
+    ipcRenderer.invoke('users:create', data),
+  usersUpdate: (data: unknown) =>
+    ipcRenderer.invoke('users:update', data),
+  usersSetActive: (data: { id: number; isActive: boolean }) =>
+    ipcRenderer.invoke('users:setActive', data),
+  usersResetPassword: (data: { id: number; newPassword: string }) =>
+    ipcRenderer.invoke('users:resetPassword', data),
+
   // Categories
   categoriesList: () => ipcRenderer.invoke('categories:list'),
   categoryCreate: (data: unknown) => ipcRenderer.invoke('categories:create', data),
