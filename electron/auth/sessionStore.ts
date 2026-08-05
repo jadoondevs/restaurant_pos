@@ -25,6 +25,12 @@
  */
 import type { AuthUser } from '../types/authUser';
 
+// TODO (Phase 2.1):
+// Authorization currently relies on the authenticated session snapshot.
+// When user management (create/edit/deactivate users) is implemented,
+// introduce immediate session invalidation for affected users by calling
+// clearSession() inside the deactivate-user and change-role IPC handlers.
+
 /** Role order from lowest to highest privilege. */
 export const ROLE_HIERARCHY: AuthUser['role'][] = ['CASHIER', 'MANAGER', 'ADMIN'];
 
