@@ -26,13 +26,11 @@ function validate(data: MenuInput) {
 }
 
 export function registerMenuHandlers() {
-  handle('menu:list', async (params: ListParams = {}) => {
+  handle('menu:list', async (_event, params: ListParams = {}) => {
     const where: Prisma.MenuItemWhereInput = {};
     if (params.categoryId) where.categoryId = params.categoryId;
     if (params.availableOnly) where.available = true;
-    if (params.search?.trim()) {
-      where.name = { contains: params.search.trim() };
-    }
+    if (params.search?.trim()) where.name = { contains: params.search.trim() };
 
     return prisma.menuItem.findMany({
       where,
@@ -41,13 +39,11 @@ export function registerMenuHandlers() {
     });
   });
 
-  handle('menu:create', async (data: MenuInput) => {
+  handle('menu:create', async (_event, data: MenuInput) => {
     validate(data);
     const name = data.name.trim();
 
-    const dupe = await prisma.menuItem.findFirst({
-      where: { name, categoryId: data.categoryId },
-    });
+    const dupe = await prisma.menuItem.findFirst({ where: { name, categoryId: data.categoryId } });
     if (dupe) throw new Error('This item already exists in the selected category.');
 
     return prisma.menuItem.create({
@@ -60,9 +56,9 @@ export function registerMenuHandlers() {
         categoryId: data.categoryId,
       },
     });
-  });
+  }, { requiredRole: 'ADMIN' });
 
-  handle('menu:update', async ({ id, data }: { id: number; data: MenuInput }) => {
+  handle('menu:update', async (_event, { id, data }: { id: number; data: MenuInput }) => {
     validate(data);
     const name = data.name.trim();
 
@@ -82,10 +78,10 @@ export function registerMenuHandlers() {
         categoryId: data.categoryId,
       },
     });
-  });
+  }, { requiredRole: 'ADMIN' });
 
-  handle('menu:delete', async (id: number) => {
+  handle('menu:delete', async (_event, id: number) => {
     await prisma.menuItem.delete({ where: { id } });
     return { success: true };
-  });
+  }, { requiredRole: 'ADMIN' });
 }

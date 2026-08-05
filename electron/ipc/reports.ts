@@ -2,8 +2,8 @@ import prisma from '../database/client';
 import { handle } from './util';
 
 interface RangeParams {
-  from: string; // ISO
-  to: string; // ISO
+  from: string;
+  to: string;
 }
 
 function startOfToday() {
@@ -12,10 +12,9 @@ function startOfToday() {
 }
 
 export function registerReportHandlers() {
-  // Dashboard summary for "today".
-  handle('reports:dashboard', async () => {
+  // Unrestricted — any authenticated user can see today's overview.
+  handle('reports:dashboard', async (_event) => {
     const start = startOfToday();
-
     const orders = await prisma.order.findMany({
       where: { createdAt: { gte: start } },
       select: { grandTotal: true, tableNumber: true, status: true },
@@ -35,8 +34,8 @@ export function registerReportHandlers() {
     };
   });
 
-  // Aggregated summary for an arbitrary date range.
-  handle('reports:summary', async ({ from, to }: RangeParams) => {
+  // MANAGER and above — detailed financial reports.
+  handle('reports:summary', async (_event, { from, to }: RangeParams) => {
     const orders = await prisma.order.findMany({
       where: { createdAt: { gte: new Date(from), lte: new Date(to) } },
       select: { grandTotal: true, subtotal: true, discount: true, taxAmount: true, createdAt: true },
@@ -47,7 +46,6 @@ export function registerReportHandlers() {
     const totalDiscount = orders.reduce((sum, o) => sum + o.discount, 0);
     const totalTax = orders.reduce((sum, o) => sum + o.taxAmount, 0);
 
-    // Group revenue by calendar day for charts / CSV.
     const byDay: Record<string, { date: string; revenue: number; orders: number }> = {};
     for (const o of orders) {
       const key = o.createdAt.toISOString().slice(0, 10);
@@ -64,10 +62,9 @@ export function registerReportHandlers() {
       totalTax: +totalTax.toFixed(2),
       daily: Object.values(byDay).map((d) => ({ ...d, revenue: +d.revenue.toFixed(2) })),
     };
-  });
+  }, { requiredRole: 'MANAGER' });
 
-  // Top selling items by quantity within a date range.
-  handle('reports:topItems', async ({ from, to }: RangeParams) => {
+  handle('reports:topItems', async (_event, { from, to }: RangeParams) => {
     const grouped = await prisma.orderItem.groupBy({
       by: ['name'],
       where: { order: { createdAt: { gte: new Date(from), lte: new Date(to) } } },
@@ -81,5 +78,5 @@ export function registerReportHandlers() {
       quantity: g._sum.quantity ?? 0,
       revenue: +(g._sum.lineTotal ?? 0).toFixed(2),
     }));
-  });
+  }, { requiredRole: 'MANAGER' });
 }

@@ -11,6 +11,8 @@ const api = {
     ipcRenderer.invoke('auth:login', { username, password }),
   currentUser: (id: number) =>
     ipcRenderer.invoke('auth:currentUser', id),
+  logout: () =>
+    ipcRenderer.invoke('auth:logout'),
   changePassword: (userId: number, currentPassword: string, newPassword: string) =>
     ipcRenderer.invoke('auth:changePassword', { userId, currentPassword, newPassword }),
 
@@ -50,7 +52,7 @@ const api = {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsUpdate: (data: unknown) => ipcRenderer.invoke('settings:update', data),
 
-  // Printing — returns { status: 'printed'|'cancelled'|'failed', error?: string }
+  // Printing
   printReceipt: (html: string) => ipcRenderer.invoke('print:receipt', html),
 
   // Backup

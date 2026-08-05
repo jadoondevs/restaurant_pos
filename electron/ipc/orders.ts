@@ -26,11 +26,6 @@ interface ListParams {
   limit?: number;
 }
 
-/**
- * Peeks at the next receipt number without persisting anything.
- * Used by the renderer to display the receipt number before the user
- * confirms the sale. The actual allocation happens inside orders:create.
- */
 async function peekReceiptNumber(): Promise<string> {
   const now = new Date();
   const y = now.getFullYear();
@@ -47,17 +42,14 @@ async function peekReceiptNumber(): Promise<string> {
 }
 
 export function registerOrderHandlers() {
-  handle('orders:peekReceiptNumber', async () => peekReceiptNumber());
+  handle('orders:peekReceiptNumber', async (_event) => peekReceiptNumber());
 
-  handle('orders:create', async (input: OrderInput) => {
+  handle('orders:create', async (_event, input: OrderInput) => {
     if (!input.items?.length) throw new Error('Cannot complete an empty order.');
 
-    // Validate line items and compute totals server-side (source of truth).
     let subtotal = 0;
     for (const item of input.items) {
-      if (!item.quantity || item.quantity < 1) {
-        throw new Error(`Invalid quantity for "${item.name}".`);
-      }
+      if (!item.quantity || item.quantity < 1) throw new Error(`Invalid quantity for "${item.name}".`);
       if (item.price < 0) throw new Error(`Invalid price for "${item.name}".`);
       subtotal += item.price * item.quantity;
     }
@@ -72,7 +64,6 @@ export function registerOrderHandlers() {
     const cashReceived = input.cashReceived ?? grandTotal;
     const change = +(Math.max(0, cashReceived - grandTotal)).toFixed(2);
 
-    // Allocate receipt number and create the order atomically in one transaction.
     return prisma.$transaction(async (tx) => {
       const now = new Date();
       const y = now.getFullYear();
@@ -80,7 +71,6 @@ export function registerOrderHandlers() {
       const dy = String(now.getDate()).padStart(2, '0');
       const dateKey = `${y}${mo}${dy}`;
 
-      // Atomic upsert: create counter row with seq=1, or increment existing.
       await tx.$executeRawUnsafe(
         `INSERT INTO "ReceiptCounter" ("dateKey", "lastSeq")
          VALUES (?, 1)
@@ -124,7 +114,7 @@ export function registerOrderHandlers() {
     });
   });
 
-  handle('orders:list', async (params: ListParams = {}) => {
+  handle('orders:list', async (_event, params: ListParams = {}) => {
     const where: Record<string, unknown> = {};
 
     if (params.from || params.to) {
@@ -154,17 +144,12 @@ export function registerOrderHandlers() {
     });
   });
 
-  handle('orders:get', async (id: number) =>
-    prisma.order.findUnique({
-      where: { id },
-      include: { items: true, customer: true },
-    })
+  handle('orders:get', async (_event, id: number) =>
+    prisma.order.findUnique({ where: { id }, include: { items: true, customer: true } })
   );
 
-  handle('orders:delete', async (id: number) => {
+  handle('orders:delete', async (_event, id: number) => {
     await prisma.order.delete({ where: { id } });
-    // ReceiptCounter is intentionally NOT decremented.
-    // Deleted orders must never cause receipt number reuse.
     return { success: true };
-  });
+  }, { requiredRole: 'MANAGER' });
 }

@@ -8,19 +8,14 @@ interface CustomerInput {
 }
 
 export function registerCustomerHandlers() {
-  handle('customers:list', async (search?: string) => {
+  handle('customers:list', async (_event, search?: string) => {
     const where = search?.trim()
-      ? {
-          OR: [
-            { name: { contains: search.trim() } },
-            { phone: { contains: search.trim() } },
-          ],
-        }
+      ? { OR: [{ name: { contains: search.trim() } }, { phone: { contains: search.trim() } }] }
       : {};
     return prisma.customer.findMany({ where, orderBy: { name: 'asc' }, take: 200 });
   });
 
-  handle('customers:create', async (data: CustomerInput) => {
+  handle('customers:create', async (_event, data: CustomerInput) => {
     if (!data.name?.trim()) throw new Error('Customer name is required.');
     return prisma.customer.create({
       data: {
@@ -31,7 +26,7 @@ export function registerCustomerHandlers() {
     });
   });
 
-  handle('customers:update', async ({ id, data }: { id: number; data: CustomerInput }) => {
+  handle('customers:update', async (_event, { id, data }: { id: number; data: CustomerInput }) => {
     if (!data.name?.trim()) throw new Error('Customer name is required.');
     return prisma.customer.update({
       where: { id },
@@ -43,7 +38,7 @@ export function registerCustomerHandlers() {
     });
   });
 
-  handle('customers:delete', async (id: number) => {
+  handle('customers:delete', async (_event, id: number) => {
     await prisma.customer.delete({ where: { id } });
     return { success: true };
   });

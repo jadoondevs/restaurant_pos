@@ -15,32 +15,23 @@ interface SettingsInput {
   cloudBackupEnabled?: boolean;
 }
 
-/** Ensures the singleton settings row (id = 1) always exists. */
 async function ensureSettings() {
-  return prisma.settings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1 },
-  });
+  return prisma.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
 }
 
 export function registerSettingsHandlers() {
-  handle('settings:get', async () => ensureSettings());
+  // Read — unrestricted. Cashiers need currency symbol, tax rate, paper size.
+  handle('settings:get', async (_event) => ensureSettings());
 
-  handle('settings:update', async (data: SettingsInput) => {
+  // Write — ADMIN only.
+  handle('settings:update', async (_event, data: SettingsInput) => {
     if (data.taxPercentage != null && data.taxPercentage < 0) {
       throw new Error('Tax percentage cannot be negative.');
     }
-    if (
-      data.receiptPaperSize != null &&
-      !['80mm', 'A4'].includes(data.receiptPaperSize)
-    ) {
+    if (data.receiptPaperSize != null && !['80mm', 'A4'].includes(data.receiptPaperSize)) {
       throw new Error('Invalid paper size. Must be "80mm" or "A4".');
     }
-    if (
-      data.backupSchedule != null &&
-      !['daily', 'weekly', 'manual'].includes(data.backupSchedule)
-    ) {
+    if (data.backupSchedule != null && !['daily', 'weekly', 'manual'].includes(data.backupSchedule)) {
       throw new Error('Invalid backup schedule.');
     }
 
@@ -61,5 +52,5 @@ export function registerSettingsHandlers() {
         cloudBackupEnabled: data.cloudBackupEnabled,
       },
     });
-  });
+  }, { requiredRole: 'ADMIN' });
 }
