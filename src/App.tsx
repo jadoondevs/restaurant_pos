@@ -12,14 +12,12 @@ import { Categories } from './pages/Categories';
 import { Customers } from './pages/Customers';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { Users } from './pages/Users';
 
 export default function App() {
   const { user, validating } = useAuth();
   const { loading } = useSettings();
 
-  // Show a loader while the session is being validated against the DB
-  // or while settings are loading. This prevents a flash of the Login
-  // screen for users with a valid existing session.
   if (validating || loading) return <PageLoader />;
   if (!user) return <Login />;
 
@@ -34,6 +32,12 @@ export default function App() {
         <Route path="customers" element={<Customers />} />
         <Route path="reports" element={<Reports />} />
         <Route path="settings" element={<Settings />} />
+        {/* ADMIN-only route. Backend enforces ADMIN on all users:* channels.
+            Frontend redirect is defence-in-depth only. */}
+        <Route
+          path="users"
+          element={user.role === 'ADMIN' ? <Users /> : <Navigate to="/" replace />}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

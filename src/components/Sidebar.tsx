@@ -9,9 +9,11 @@ import {
   BarChart3,
   Settings as SettingsIcon,
   ChefHat,
+  UserCog,
 } from 'lucide-react';
+import type { UserRole } from '@/types';
 
-const links = [
+const baseLinks = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/pos', label: 'POS', icon: ShoppingCart },
   { to: '/orders', label: 'Orders', icon: ReceiptText },
@@ -22,7 +24,20 @@ const links = [
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
-export function Sidebar({ restaurantName }: { restaurantName: string }) {
+interface SidebarProps {
+  restaurantName: string;
+  userRole?: UserRole;
+}
+
+export function Sidebar({ restaurantName, userRole }: SidebarProps) {
+  const links = [
+    ...baseLinks,
+    // Users link is only shown to ADMIN users.
+    ...(userRole === 'ADMIN'
+      ? [{ to: '/users', label: 'Users', icon: UserCog, end: false }]
+      : []),
+  ];
+
   return (
     <aside className="flex h-full w-60 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center gap-2 px-5 py-5">
