@@ -12,6 +12,7 @@ export interface ElectronApi {
     password: string
   ): Promise<IpcResult<AuthUser>>;
   currentUser(id: number): Promise<IpcResult<AuthUser>>;
+  logout(): Promise<IpcResult<{ success: boolean }>>;
   changePassword(
     userId: number,
     currentPassword: string,

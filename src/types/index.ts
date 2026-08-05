@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 /** Role values for the User model. */
-export type UserRole = 'ADMIN' | 'CASHIER';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER';
 
 /**
  * The authenticated user session payload.

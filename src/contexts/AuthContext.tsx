@@ -66,6 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Clear the main-process session store (fire-and-forget).
+    // An IPC failure here must never block the local logout — the renderer
+    // clears its own state unconditionally regardless of the IPC result.
+    api.logout().catch(() => {});
     setUser(null);
     sessionStorage.removeItem(STORAGE_KEY);
   }, []);

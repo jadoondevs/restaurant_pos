@@ -30,6 +30,8 @@ export const api = {
     unwrap<AuthUser>(window.api.login(username, password)),
   currentUser: (id: number) =>
     unwrap<AuthUser>(window.api.currentUser(id)),
+  logout: () =>
+    unwrap(window.api.logout()),
   changePassword: (userId: number, current: string, next: string) =>
     unwrap(window.api.changePassword(userId, current, next)),
 
