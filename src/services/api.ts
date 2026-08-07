@@ -41,7 +41,7 @@ export const api = {
     unwrap<UserRecord[]>(window.api.usersList()),
   createUser: (data: { username: string; fullName: string; role: string; initialPassword: string }) =>
     unwrap<UserRecord>(window.api.usersCreate(data)),
-  updateUser: (data: { id: number; fullName: string; role: string }) =>
+  updateUser: (data: { id: number; username: string; fullName: string; role: string }) =>
     unwrap<UserRecord>(window.api.usersUpdate(data)),
   setUserActive: (id: number, isActive: boolean) =>
     unwrap<UserRecord>(window.api.usersSetActive({ id, isActive })),

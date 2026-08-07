@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api } from '@/services/api';
 import { useToast } from '@/contexts/ToastContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -11,6 +12,8 @@ import type { Category } from '@/types';
 
 export function Categories() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canManage = user?.role === 'ADMIN';
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [editing, setEditing] = useState<Category | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -71,11 +74,11 @@ export function Categories() {
       <PageHeader
         title="Categories"
         subtitle="Organize your menu"
-        action={
+        action={canManage ? (
           <Button onClick={openCreate}>
             <Plus size={18} /> New Category
           </Button>
-        }
+        ) : undefined}
       />
 
       <Card className="p-0">
@@ -89,7 +92,7 @@ export function Categories() {
                   <span className="font-medium text-slate-900 dark:text-slate-100">{c.name}</span>
                   <Badge>{c._count?.items ?? 0} items</Badge>
                 </div>
-                <div className="flex gap-1">
+                {canManage && <div className="flex gap-1">
                   <button
                     onClick={() => openEdit(c)}
                     className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
@@ -102,14 +105,14 @@ export function Categories() {
                   >
                     <Trash2 size={16} />
                   </button>
-                </div>
+                </div>}
               </li>
             ))}
           </ul>
         )}
       </Card>
 
-      <Modal
+      {canManage && <Modal
         open={formOpen}
         title={editing ? 'Edit Category' : 'New Category'}
         onClose={() => setFormOpen(false)}
@@ -132,15 +135,15 @@ export function Categories() {
           placeholder="e.g. Burgers"
           autoFocus
         />
-      </Modal>
+      </Modal>}
 
-      <ConfirmDialog
+      {canManage && <ConfirmDialog
         open={!!toDelete}
         title="Delete Category"
         message={`Delete "${toDelete?.name}"? All items in this category will also be removed.`}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
-      />
+      />}
     </div>
   );
 }

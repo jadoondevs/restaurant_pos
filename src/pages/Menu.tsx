@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api } from '@/services/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatCurrency } from '@/utils/format';
 import { Card } from '@/components/ui/Card';
@@ -32,8 +33,10 @@ const emptyForm: FormState = {
 
 export function Menu() {
   const { settings } = useSettings();
+  const { user } = useAuth();
   const { toast } = useToast();
   const sym = settings?.currencySymbol ?? '$';
+  const canManage = user?.role === 'ADMIN';
 
   const [items, setItems] = useState<MenuItem[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -135,11 +138,11 @@ export function Menu() {
       <PageHeader
         title="Menu"
         subtitle="Manage your menu items"
-        action={
+        action={canManage ? (
           <Button onClick={openCreate} disabled={categories.length === 0}>
             <Plus size={18} /> New Item
           </Button>
-        }
+        ) : undefined}
       />
 
       {categories.length === 0 && (
@@ -182,7 +185,7 @@ export function Menu() {
                   <th className="px-4 py-3 font-medium">Category</th>
                   <th className="px-4 py-3 text-right font-medium">Price</th>
                   <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  {canManage && <th className="px-4 py-3 text-right font-medium">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -210,7 +213,7 @@ export function Menu() {
                         <Badge tone="red">Unavailable</Badge>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    {canManage && <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
                         <button
                           onClick={() => openEdit(item)}
@@ -225,7 +228,7 @@ export function Menu() {
                           <Trash2 size={16} />
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -234,7 +237,7 @@ export function Menu() {
         )}
       </Card>
 
-      <Modal
+      {canManage && <Modal
         open={formOpen}
         title={editing ? 'Edit Item' : 'New Item'}
         onClose={() => setFormOpen(false)}
@@ -307,15 +310,15 @@ export function Menu() {
             Available for sale
           </label>
         </div>
-      </Modal>
+      </Modal>}
 
-      <ConfirmDialog
+      {canManage && <ConfirmDialog
         open={!!toDelete}
         title="Delete Item"
         message={`Delete "${toDelete?.name}"?`}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
-      />
+      />}
     </div>
   );
 }

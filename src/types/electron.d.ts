@@ -29,6 +29,7 @@ export interface ElectronApi {
   }): Promise<IpcResult<UserRecord>>;
   usersUpdate(data: {
     id: number;
+    username: string;
     fullName: string;
     role: string;
   }): Promise<IpcResult<UserRecord>>;

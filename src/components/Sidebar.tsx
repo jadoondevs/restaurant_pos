@@ -31,7 +31,7 @@ interface SidebarProps {
 
 export function Sidebar({ restaurantName, userRole }: SidebarProps) {
   const links = [
-    ...baseLinks,
+    ...baseLinks.filter(({ to }) => to !== '/reports' || userRole !== 'CASHIER'),
     // Users link is only shown to ADMIN users.
     ...(userRole === 'ADMIN'
       ? [{ to: '/users', label: 'Users', icon: UserCog, end: false }]

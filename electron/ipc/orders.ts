@@ -26,6 +26,15 @@ interface ListParams {
   limit?: number;
 }
 
+async function attachCashierRoles<T extends { cashierName: string | null }>(orders: T[]) {
+  const users = await prisma.user.findMany({ select: { fullName: true, role: true } });
+  const roles = new Map(users.map((u) => [u.fullName, u.role]));
+  return orders.map((order) => ({
+    ...order,
+    cashierRole: order.cashierName ? roles.get(order.cashierName) ?? null : null,
+  }));
+}
+
 async function peekReceiptNumber(): Promise<string> {
   const now = new Date();
   const y = now.getFullYear();
@@ -136,17 +145,24 @@ export function registerOrderHandlers() {
       ];
     }
 
-    return prisma.order.findMany({
+    const orders = await prisma.order.findMany({
       where,
       include: { items: true, customer: true },
       orderBy: { createdAt: 'desc' },
       take: params.limit ?? 200,
     });
+    return attachCashierRoles(orders);
   });
 
-  handle('orders:get', async (_event, id: number) =>
-    prisma.order.findUnique({ where: { id }, include: { items: true, customer: true } })
-  );
+  handle('orders:get', async (_event, id: number) => {
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { items: true, customer: true },
+    });
+    if (!order) return null;
+    const [withRole] = await attachCashierRoles([order]);
+    return withRole;
+  });
 
   handle('orders:delete', async (_event, id: number) => {
     await prisma.order.delete({ where: { id } });

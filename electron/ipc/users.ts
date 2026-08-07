@@ -45,10 +45,6 @@ export function registerUserHandlers() {
   // Creates a new user. The admin supplies an initial password which the
   // user must change on first login (mustChangePassword=true).
   //
-  // Username is immutable after creation. Rationale: orders store
-  // cashierName as a plain string snapshot at the time of sale. Allowing
-  // username changes would create a mismatch between historical receipts
-  // and the current user record, making audit trails unreliable.
   // ---------------------------------------------------------------------------
   handle('users:create', async (_event, data: {
     username: string;
@@ -99,14 +95,18 @@ export function registerUserHandlers() {
 
   // ---------------------------------------------------------------------------
   // users:update
-  // Edits fullName and role. Username is intentionally excluded.
+  // Edits username, fullName, and role. Password hashes are untouched.
   // ---------------------------------------------------------------------------
   handle('users:update', async (_event, data: {
     id: number;
+    username: string;
     fullName: string;
     role: string;
   }) => {
     if (!data.id || typeof data.id !== 'number') throw new Error('Invalid user id.');
+
+    const username = data.username?.trim();
+    if (!username) throw new Error('Username is required.');
 
     const fullName = data.fullName?.trim();
     if (!fullName) throw new Error('Full name is required.');
@@ -116,9 +116,14 @@ export function registerUserHandlers() {
     const user = await prisma.user.findUnique({ where: { id: data.id } });
     if (!user) throw new Error('User not found.');
 
+    const existing = await prisma.user.findUnique({ where: { username } });
+    if (existing && existing.id !== data.id) {
+      throw new Error(`Username "${username}" is already taken.`);
+    }
+
     return prisma.user.update({
       where: { id: data.id },
-      data: { fullName, role },
+      data: { username, fullName, role },
       select: {
         id: true,
         username: true,

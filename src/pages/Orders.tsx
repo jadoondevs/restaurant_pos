@@ -3,6 +3,7 @@ import { Search, Printer, Trash2, Eye } from 'lucide-react';
 import { api } from '@/services/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatCurrency, formatTime } from '@/utils/format';
 import { buildReceiptHtml, orderToReceiptData } from '@/utils/receipt';
@@ -16,7 +17,9 @@ import type { Order } from '@/types';
 export function Orders() {
   const { settings } = useSettings();
   const { toast } = useToast();
+  const { user } = useAuth();
   const sym = settings?.currencySymbol ?? '$';
+  const canDelete = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [search, setSearch] = useState('');
@@ -89,6 +92,7 @@ export function Orders() {
               <thead className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-700">
                 <tr>
                   <th className="px-4 py-3 font-medium">Receipt</th>
+                  <th className="px-4 py-3 font-medium">Cashier</th>
                   <th className="px-4 py-3 font-medium">Time</th>
                   <th className="px-4 py-3 font-medium">Items</th>
                   <th className="px-4 py-3 font-medium">Customer</th>
@@ -104,6 +108,9 @@ export function Orders() {
                   >
                     <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                       {o.receiptNumber}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      {o.cashierName ?? 'Unknown'}
                     </td>
                     <td className="px-4 py-3 text-slate-500">{formatTime(o.createdAt)}</td>
                     <td className="px-4 py-3">
@@ -123,9 +130,11 @@ export function Orders() {
                         <IconBtn title="Reprint" onClick={() => reprint(o)}>
                           <Printer size={16} />
                         </IconBtn>
-                        <IconBtn title="Delete" danger onClick={() => setToDelete(o)}>
-                          <Trash2 size={16} />
-                        </IconBtn>
+                        {canDelete && (
+                          <IconBtn title="Delete" danger onClick={() => setToDelete(o)}>
+                            <Trash2 size={16} />
+                          </IconBtn>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -152,6 +161,12 @@ export function Orders() {
         {selected && (
           <div className="space-y-3">
             <p className="text-sm text-slate-500">{formatTime(selected.createdAt)}</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Cashier: <span className="font-medium">{selected.cashierName ?? 'Unknown'}</span>
+              {selected.cashierRole && (
+                <span className="ml-1 text-xs font-medium text-slate-500">({selected.cashierRole})</span>
+              )}
+            </p>
             <ul className="divide-y divide-slate-100 dark:divide-slate-700">
               {selected.items.map((it) => (
                 <li key={it.id} className="flex justify-between py-2 text-sm">

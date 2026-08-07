@@ -95,6 +95,7 @@ export interface Order {
   change: number;
   tableNumber: string | null;
   cashierName: string | null;
+  cashierRole?: UserRole | null;
   status: string;
   customerId: number | null;
   customer?: Customer | null;

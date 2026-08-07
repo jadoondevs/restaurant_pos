@@ -25,6 +25,7 @@ export function Settings() {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
+  const canEditSettings = user?.role === 'ADMIN';
 
   useEffect(() => {
     if (settings) setForm(settings);
@@ -82,11 +83,11 @@ export function Settings() {
       <PageHeader
         title="Settings"
         subtitle="Configure your restaurant"
-        action={
+        action={canEditSettings ? (
           <Button onClick={saveSettings} disabled={saving}>
             <Save size={18} /> {saving ? 'Saving...' : 'Save Changes'}
           </Button>
-        }
+        ) : undefined}
       />
 
       <div className="space-y-6">
@@ -98,16 +99,19 @@ export function Settings() {
             <Input
               label="Restaurant Name"
               value={form.restaurantName}
+              disabled={!canEditSettings}
               onChange={(e) => setForm({ ...form, restaurantName: e.target.value })}
             />
             <Input
               label="Address"
               value={form.address}
+              disabled={!canEditSettings}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
             />
             <Input
               label="Phone Number"
               value={form.phone}
+              disabled={!canEditSettings}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
           </div>
@@ -125,6 +129,7 @@ export function Settings() {
                 min={0}
                 step="0.1"
                 value={form.taxPercentage}
+                disabled={!canEditSettings}
                 onChange={(e) =>
                   setForm({ ...form, taxPercentage: parseFloat(e.target.value) || 0 })
                 }
@@ -132,6 +137,7 @@ export function Settings() {
               <Input
                 label="Currency Symbol"
                 value={form.currencySymbol}
+                disabled={!canEditSettings}
                 onChange={(e) => setForm({ ...form, currencySymbol: e.target.value })}
               />
             </div>
@@ -141,6 +147,7 @@ export function Settings() {
               </label>
               <select
                 value={form.receiptPaperSize}
+                disabled={!canEditSettings}
                 onChange={(e) => setForm({ ...form, receiptPaperSize: e.target.value })}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
               >
@@ -152,6 +159,7 @@ export function Settings() {
               label="Receipt Footer"
               rows={2}
               value={form.receiptFooter}
+              disabled={!canEditSettings}
               onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })}
             />
           </div>
@@ -169,13 +177,14 @@ export function Settings() {
             <input
               type="checkbox"
               checked={form.darkMode}
+              disabled={!canEditSettings}
               onChange={(e) => setForm({ ...form, darkMode: e.target.checked })}
               className="h-5 w-5 rounded border-slate-300"
             />
           </label>
         </Card>
 
-        <BackupSection />
+        {canEditSettings && <BackupSection />}
 
         <Card>
           <div className="flex items-center justify-between">

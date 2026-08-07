@@ -30,7 +30,10 @@ export default function App() {
         <Route path="menu" element={<Menu />} />
         <Route path="categories" element={<Categories />} />
         <Route path="customers" element={<Customers />} />
-        <Route path="reports" element={<Reports />} />
+        <Route
+          path="reports"
+          element={user.role === 'CASHIER' ? <Navigate to="/" replace /> : <Reports />}
+        />
         <Route path="settings" element={<Settings />} />
         {/* ADMIN-only route. Backend enforces ADMIN on all users:* channels.
             Frontend redirect is defence-in-depth only. */}

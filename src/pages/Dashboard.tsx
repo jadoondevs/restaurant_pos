@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { DollarSign, ShoppingBag, TrendingUp, Users, Plus, ReceiptText, BarChart3 } from 'lucide-react';
 import { api } from '@/services/api';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/utils/format';
 import { StatCard, Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +13,7 @@ import type { DashboardStats } from '@/types';
 export function Dashboard() {
   const navigate = useNavigate();
   const { settings } = useSettings();
+  const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const sym = settings?.currencySymbol ?? '$';
 
@@ -56,16 +58,18 @@ export function Dashboard() {
         <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-100">
           Quick Actions
         </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Button size="lg" onClick={() => navigate('/pos')}>
             <Plus size={18} /> New Sale
           </Button>
           <Button size="lg" variant="secondary" onClick={() => navigate('/orders')}>
             <ReceiptText size={18} /> View Orders
           </Button>
-          <Button size="lg" variant="secondary" onClick={() => navigate('/reports')}>
-            <BarChart3 size={18} /> Reports
-          </Button>
+          {user?.role !== 'CASHIER' && (
+            <Button size="lg" variant="secondary" onClick={() => navigate('/reports')}>
+              <BarChart3 size={18} /> Reports
+            </Button>
+          )}
         </div>
       </Card>
     </div>

@@ -48,6 +48,7 @@ interface CreateForm {
 }
 
 interface EditForm {
+  username: string;
   fullName: string;
   role: UserRole;
 }
@@ -83,7 +84,7 @@ export function Users() {
 
   // Edit dialog
   const [editTarget, setEditTarget] = useState<UserRecord | null>(null);
-  const [editForm, setEditForm] = useState<EditForm>({ fullName: '', role: 'CASHIER' });
+  const [editForm, setEditForm] = useState<EditForm>({ username: '', fullName: '', role: 'CASHIER' });
 
   // Reset password dialog
   const [resetTarget, setResetTarget] = useState<UserRecord | null>(null);
@@ -143,17 +144,19 @@ export function Users() {
   // ---------------------------------------------------------------------------
   const openEdit = (user: UserRecord) => {
     setEditTarget(user);
-    setEditForm({ fullName: user.fullName, role: user.role });
+    setEditForm({ username: user.username, fullName: user.fullName, role: user.role });
   };
 
   const submitEdit = async () => {
     if (!editTarget) return;
+    if (!editForm.username.trim()) return toast('Username is required.', 'error');
     if (!editForm.fullName.trim()) return toast('Full name is required.', 'error');
 
     setSaving(true);
     try {
       await api.updateUser({
         id: editTarget.id,
+        username: editForm.username.trim(),
         fullName: editForm.fullName.trim(),
         role: editForm.role,
       });
@@ -337,7 +340,7 @@ export function Users() {
             placeholder="e.g. john.doe"
           />
           <p className="-mt-2 text-xs text-slate-400">
-            Username cannot be changed after creation.
+            An administrator can edit the username later.
           </p>
           <Input
             label="Full Name"
@@ -399,16 +402,17 @@ export function Users() {
             <p className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">
               Username
             </p>
-            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800">
-              {editTarget?.username}
-            </p>
-            <p className="mt-1 text-xs text-slate-400">Username cannot be changed.</p>
+            <Input
+              label="Username"
+              value={editForm.username}
+              onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+              autoFocus
+            />
           </div>
           <Input
             label="Full Name"
             value={editForm.fullName}
             onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-            autoFocus
           />
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
