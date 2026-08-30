@@ -3,6 +3,7 @@ import { registerCategoryHandlers } from './categories';
 import { registerMenuHandlers } from './menu';
 import { registerOrderHandlers } from './orders';
 import { registerPaymentHandlers } from './payments';
+import { registerConsumptionPersonHandlers } from './consumptionPersons';
 import { registerCustomerHandlers } from './customers';
 import { registerReportHandlers } from './reports';
 import { registerSettingsHandlers } from './settings';
@@ -18,6 +19,7 @@ export function registerIpcHandlers() {
   registerMenuHandlers();
   registerOrderHandlers();
   registerPaymentHandlers();
+  registerConsumptionPersonHandlers();
   registerCustomerHandlers();
   registerReportHandlers();
   registerSettingsHandlers();

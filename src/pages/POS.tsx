@@ -8,11 +8,20 @@ import { useToast } from '@/contexts/ToastContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/utils/format';
 import { buildReceiptHtml } from '@/utils/receipt';
+import { calculateServiceCharge, calculateTotalDue } from '@/utils/billing';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { EmptyState, Spinner } from '@/components/ui/Misc';
-import type { Category, MenuItem, Customer, ReceiptData } from '@/types';
+import type {
+  Category,
+  MenuItem,
+  Customer,
+  ReceiptData,
+  OrderType,
+  ConsumptionPerson,
+  ServiceChargeType,
+} from '@/types';
 
 type CheckoutIssue =
   | { kind: 'cancelled' }
@@ -43,17 +52,30 @@ export function POS() {
   const [instructionFor, setInstructionFor] = useState<number | null>(null);
   const [instructionText, setInstructionText] = useState('');
 
+  // Order classification — normal sale vs. owner/employee consumption.
+  const [orderType, setOrderType] = useState<OrderType>('SALE');
+  const [consumptionPersons, setConsumptionPersons] = useState<ConsumptionPerson[]>([]);
+  const [consumptionPersonId, setConsumptionPersonId] = useState<number | null>(null);
+  const [consumptionNotes, setConsumptionNotes] = useState('');
+  const [newPersonName, setNewPersonName] = useState('');
+  const [addingPerson, setAddingPerson] = useState(false);
+
+  // Service charge — optional, entered at checkout.
+  const [serviceChargeType, setServiceChargeType] = useState<ServiceChargeType>('NONE');
+  const [serviceChargeValue, setServiceChargeValue] = useState('');
+
   // Print-first checkout state.
   const [checkoutIssue, setCheckoutIssue] = useState<CheckoutIssue | null>(null);
   // Holds the draft receipt while waiting for user decision after cancel/fail.
   const [pendingReceipt, setPendingReceipt] = useState<ReceiptData | null>(null);
 
-  // Load categories + customers once.
+  // Load categories + customers + consumption persons once.
   useEffect(() => {
-    Promise.all([api.listCategories(), api.listCustomers()])
-      .then(([cats, custs]) => {
+    Promise.all([api.listCategories(), api.listCustomers(), api.listConsumptionPersons()])
+      .then(([cats, custs, persons]) => {
         setCategories(cats);
         setCustomers(custs);
+        setConsumptionPersons(persons);
       })
       .catch((e) => toast(e.message, 'error'));
   }, [toast]);
@@ -68,10 +90,65 @@ export function POS() {
       .finally(() => setLoading(false));
   }, [activeCat, debouncedSearch, toast]);
 
+  // Service charge amount and the resulting total due — mirrors the exact
+  // calculation orders:create performs server-side (electron/utils/billing.ts)
+  // so the total shown here matches what actually gets persisted.
+  const serviceChargeAmount = useMemo(
+    () =>
+      calculateServiceCharge(serviceChargeType, parseFloat(serviceChargeValue) || 0, cart.totals.grandTotal),
+    [serviceChargeType, serviceChargeValue, cart.totals.grandTotal]
+  );
+  const totalDue = useMemo(
+    () => calculateTotalDue(cart.totals.grandTotal, serviceChargeAmount),
+    [cart.totals.grandTotal, serviceChargeAmount]
+  );
+
   const change = useMemo(() => {
     const cash = parseFloat(cashReceived) || 0;
-    return Math.max(0, cash - cart.totals.grandTotal);
-  }, [cashReceived, cart.totals.grandTotal]);
+    return Math.max(0, cash - totalDue);
+  }, [cashReceived, totalDue]);
+
+  // Keep "Cash Received" in sync with the total whenever the service charge
+  // changes, the same way it's set when the payment modal first opens — the
+  // cashier can still overtype it afterward. Deliberately depends only on
+  // the service charge inputs, not totalDue/payOpen themselves, so this
+  // doesn't fight the cashier's own edits to Cash Received on every render.
+  useEffect(() => {
+    if (payOpen) setCashReceived(totalDue.toFixed(2));
+  }, [serviceChargeType, serviceChargeValue]);
+
+  const filteredConsumptionPersons = useMemo(
+    () =>
+      consumptionPersons.filter(
+        (p) => p.type === (orderType === 'OWNER_CONSUMPTION' ? 'OWNER' : 'EMPLOYEE')
+      ),
+    [consumptionPersons, orderType]
+  );
+
+  const resetConsumptionState = () => {
+    setOrderType('SALE');
+    setConsumptionPersonId(null);
+    setConsumptionNotes('');
+    setNewPersonName('');
+    setAddingPerson(false);
+  };
+
+  const handleAddPerson = async () => {
+    const name = newPersonName.trim();
+    if (!name) return;
+    try {
+      const person = await api.createConsumptionPerson({
+        name,
+        type: orderType === 'OWNER_CONSUMPTION' ? 'OWNER' : 'EMPLOYEE',
+      });
+      setConsumptionPersons((prev) => [...prev, person]);
+      setConsumptionPersonId(person.id);
+      setNewPersonName('');
+      setAddingPerson(false);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to add person.', 'error');
+    }
+  };
 
   const openInstructions = (menuItemId: number, current?: string) => {
     setInstructionFor(menuItemId);
@@ -102,12 +179,20 @@ export function POS() {
       tableNumber: receiptData.tableNumber,
       customerId,
       cashierName: receiptData.cashierName,
+      serviceChargeType,
+      serviceChargeValue: parseFloat(serviceChargeValue) || 0,
+      orderType,
+      consumptionPersonId: orderType === 'SALE' ? null : consumptionPersonId,
+      consumptionNotes: orderType === 'SALE' ? null : consumptionNotes.trim() || null,
     });
     toast(`Sale complete — ${order.receiptNumber}`, 'success');
     cart.clear();
     setCashReceived('');
     setTableNumber('');
     setCustomerId(null);
+    setServiceChargeType('NONE');
+    setServiceChargeValue('');
+    resetConsumptionState();
     setPayOpen(false);
     setCheckoutIssue(null);
     setPendingReceipt(null);
@@ -122,6 +207,10 @@ export function POS() {
       return;
     }
     if (!settings) return;
+    if (orderType !== 'SALE' && !consumptionPersonId) {
+      toast('Select the owner or employee for this order.', 'error');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -131,7 +220,10 @@ export function POS() {
       // 2. Build the draft receipt.
       // cashierName comes from the authenticated user's fullName.
       // This is the only place cashierName is set — never from arbitrary input.
-      const cashAmt = parseFloat(cashReceived) || cart.totals.grandTotal;
+      // Measured against totalDue (grandTotal + serviceChargeAmount), same
+      // as orders:create, so cashReceived/change stay correct once a
+      // service charge is present.
+      const cashAmt = parseFloat(cashReceived) || totalDue;
       const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
       const receiptData: ReceiptData = {
@@ -153,7 +245,7 @@ export function POS() {
         taxAmount: cart.totals.taxAmount,
         grandTotal: cart.totals.grandTotal,
         cashReceived: cashAmt,
-        change: Math.max(0, cashAmt - cart.totals.grandTotal),
+        change: Math.max(0, cashAmt - totalDue),
       };
 
       // 3. Print the receipt.
@@ -376,7 +468,7 @@ export function POS() {
             className="w-full"
             disabled={cart.isEmpty}
             onClick={() => {
-              setCashReceived(cart.totals.grandTotal.toFixed(2));
+              setCashReceived(totalDue.toFixed(2));
               setPayOpen(true);
             }}
           >
@@ -428,8 +520,132 @@ export function POS() {
             </label>
           </div>
 
-          <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-800">
-            <Row label="Total Due" value={formatCurrency(cart.totals.grandTotal, sym)} bold />
+          {/* Order type — normal sale vs. owner/employee consumption */}
+          <div>
+            <span className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Order Type
+            </span>
+            <div className="inline-flex w-full rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+              {(
+                [
+                  ['SALE', 'Customer Sale'],
+                  ['OWNER_CONSUMPTION', 'Owner'],
+                  ['EMPLOYEE_CONSUMPTION', 'Employee'],
+                ] as [OrderType, string][]
+              ).map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => {
+                    setOrderType(type);
+                    setConsumptionPersonId(null);
+                    setAddingPerson(false);
+                  }}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    orderType === type
+                      ? 'bg-brand-600 text-white'
+                      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {orderType !== 'SALE' && (
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-900/10">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee'}
+                </span>
+                {addingPerson ? (
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={newPersonName}
+                      onChange={(e) => setNewPersonName(e.target.value)}
+                      placeholder="Name"
+                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+                    />
+                    <Button size="sm" onClick={handleAddPerson}>
+                      Add
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setAddingPerson(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select
+                      value={consumptionPersonId ?? ''}
+                      onChange={(e) =>
+                        setConsumptionPersonId(e.target.value ? Number(e.target.value) : null)
+                      }
+                      className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+                    >
+                      <option value="">Select...</option>
+                      {filteredConsumptionPersons.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" variant="secondary" onClick={() => setAddingPerson(true)}>
+                      + New
+                    </Button>
+                  </div>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Notes (optional)
+                </span>
+                <textarea
+                  value={consumptionNotes}
+                  onChange={(e) => setConsumptionNotes(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. staff meal, family visit"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="space-y-2 rounded-lg bg-slate-50 p-4 dark:bg-slate-800">
+            <Row label="Food Total" value={formatCurrency(cart.totals.grandTotal, sym)} />
+
+            <div className="flex items-center gap-2">
+              <select
+                value={serviceChargeType}
+                onChange={(e) => setServiceChargeType(e.target.value as ServiceChargeType)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
+              >
+                <option value="NONE">No Service Charge</option>
+                <option value="FIXED">Service Charge (PKR)</option>
+                <option value="PERCENTAGE">Service Charge (%)</option>
+              </select>
+              {serviceChargeType !== 'NONE' && (
+                <input
+                  type="number"
+                  min={0}
+                  value={serviceChargeValue}
+                  onChange={(e) => setServiceChargeValue(e.target.value)}
+                  placeholder={serviceChargeType === 'PERCENTAGE' ? '%' : sym}
+                  className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm dark:border-slate-600 dark:bg-slate-800"
+                />
+              )}
+              {serviceChargeAmount > 0 && (
+                <span className="text-sm text-slate-500">
+                  = {formatCurrency(serviceChargeAmount, sym)}
+                </span>
+              )}
+            </div>
+
+            <div className="border-t border-slate-200 pt-2 dark:border-slate-700">
+              <Row label="Total Due" value={formatCurrency(totalDue, sym)} bold />
+            </div>
           </div>
 
           <Input

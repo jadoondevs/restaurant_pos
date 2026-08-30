@@ -5,6 +5,7 @@ import type {
   MenuItem,
   Order,
   Payment,
+  ConsumptionPerson,
   Customer,
   Settings,
   DashboardStats,
@@ -85,6 +86,12 @@ export const api = {
   updatePayment: (data: { id: number; method?: string; amount?: number; paymentAccountId?: number | null }) =>
     unwrap<Payment>(window.api.paymentsUpdate(data)),
   deletePayment: (id: number) => unwrap(window.api.paymentsDelete(id)),
+
+  // Owner/employee consumption
+  listConsumptionPersons: (type?: string) =>
+    unwrap<ConsumptionPerson[]>(window.api.consumptionList(type)),
+  createConsumptionPerson: (data: { name: string; type: string }) =>
+    unwrap<ConsumptionPerson>(window.api.consumptionCreate(data)),
 
   // Customers
   listCustomers: (search?: string) => unwrap<Customer[]>(window.api.customersList(search)),

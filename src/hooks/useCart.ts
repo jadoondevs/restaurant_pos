@@ -47,6 +47,16 @@ export function useCart(taxPercentage: number) {
     );
   }, []);
 
+  // Direct quantity entry (typed into the cart, not just +/-).
+  // Same floor as decrement — never below 1; non-numeric/invalid input
+  // falls back to 1 rather than leaving the cart in an invalid state.
+  const setQuantity = useCallback((menuItemId: number, quantity: number) => {
+    const safe = Math.max(1, Math.floor(quantity) || 1);
+    setItems((prev) =>
+      prev.map((i) => (i.menuItemId === menuItemId ? { ...i, quantity: safe } : i))
+    );
+  }, []);
+
   const removeItem = useCallback((menuItemId: number) => {
     setItems((prev) => prev.filter((i) => i.menuItemId !== menuItemId));
   }, []);
@@ -83,6 +93,7 @@ export function useCart(taxPercentage: number) {
     addItem,
     increment,
     decrement,
+    setQuantity,
     removeItem,
     setInstructions,
     clear,

@@ -85,6 +85,17 @@ export interface OrderItem {
 
 export type ServiceChargeType = 'NONE' | 'FIXED' | 'PERCENTAGE';
 export type PaymentStatus = 'PENDING' | 'PARTIAL' | 'PAID';
+export type OrderType = 'SALE' | 'OWNER_CONSUMPTION' | 'EMPLOYEE_CONSUMPTION';
+
+/** An owner or employee an order can be attributed to for consumption tracking. */
+export interface ConsumptionPerson {
+  id: number;
+  name: string;
+  type: 'OWNER' | 'EMPLOYEE';
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface Order {
   id: number;
@@ -109,6 +120,10 @@ export interface Order {
   serviceChargeAmount: number;
   paymentStatus: PaymentStatus;
   payments?: Payment[];
+  orderType: OrderType;
+  consumptionPersonId: number | null;
+  consumptionPersonName: string | null;
+  consumptionNotes: string | null;
 }
 
 /**

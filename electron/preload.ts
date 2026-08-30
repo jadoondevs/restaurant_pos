@@ -54,6 +54,10 @@ const api = {
   paymentsUpdate: (data: unknown) => ipcRenderer.invoke('payments:update', data),
   paymentsDelete: (id: number) => ipcRenderer.invoke('payments:delete', id),
 
+  // Owner/employee consumption
+  consumptionList: (type?: string) => ipcRenderer.invoke('consumption:list', type),
+  consumptionCreate: (data: unknown) => ipcRenderer.invoke('consumption:create', data),
+
   // Customers
   customersList: (search?: string) => ipcRenderer.invoke('customers:list', search),
   customerCreate: (data: unknown) => ipcRenderer.invoke('customers:create', data),

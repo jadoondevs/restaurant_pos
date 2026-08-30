@@ -17,6 +17,9 @@ interface OrderItemInput {
   specialInstructions?: string | null;
 }
 
+const ORDER_TYPES = ['SALE', 'OWNER_CONSUMPTION', 'EMPLOYEE_CONSUMPTION'] as const;
+type OrderType = (typeof ORDER_TYPES)[number];
+
 interface OrderInput {
   items: OrderItemInput[];
   discount?: number;
@@ -27,6 +30,9 @@ interface OrderInput {
   cashierName?: string | null;
   serviceChargeType?: string;
   serviceChargeValue?: number;
+  orderType?: string;
+  consumptionPersonId?: number | null;
+  consumptionNotes?: string | null;
 }
 
 interface ListParams {
@@ -75,6 +81,32 @@ export function registerOrderHandlers() {
 
     const discount = Math.max(0, input.discount ?? 0);
     if (discount > subtotal) throw new Error('Discount cannot exceed the subtotal.');
+
+    // Order classification (owner/employee consumption). A non-SALE order
+    // still goes through the exact same item/total/cashier/payment
+    // machinery as a normal sale — it's a real transaction with full
+    // item-level detail, just tagged and attributed to a specific person.
+    const orderType: OrderType = ORDER_TYPES.includes(input.orderType as OrderType)
+      ? (input.orderType as OrderType)
+      : 'SALE';
+
+    let consumptionPersonId: number | null = null;
+    let consumptionPersonName: string | null = null;
+    let consumptionNotes: string | null = null;
+
+    if (orderType !== 'SALE') {
+      if (!input.consumptionPersonId) {
+        throw new Error('Select the owner or employee for this order.');
+      }
+      const person = await prisma.consumptionPerson.findUnique({
+        where: { id: input.consumptionPersonId },
+      });
+      if (!person) throw new Error('Selected owner/employee not found.');
+
+      consumptionPersonId = person.id;
+      consumptionPersonName = person.name; // snapshot — survives later edits/deactivation
+      consumptionNotes = input.consumptionNotes?.trim() || null;
+    }
 
     const taxRate = Math.max(0, input.taxRate ?? 0);
     const taxable = subtotal - discount;
@@ -145,6 +177,10 @@ export function registerOrderHandlers() {
           serviceChargeValue,
           serviceChargeAmount,
           paymentStatus: initialPaymentStatus,
+          orderType,
+          consumptionPersonId,
+          consumptionPersonName,
+          consumptionNotes,
           items: {
             create: input.items.map((item) => ({
               menuItemId: item.menuItemId || null,
