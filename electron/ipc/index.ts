@@ -2,6 +2,7 @@ import { registerAuthHandlers } from './auth';
 import { registerCategoryHandlers } from './categories';
 import { registerMenuHandlers } from './menu';
 import { registerOrderHandlers } from './orders';
+import { registerPaymentHandlers } from './payments';
 import { registerCustomerHandlers } from './customers';
 import { registerReportHandlers } from './reports';
 import { registerSettingsHandlers } from './settings';
@@ -16,6 +17,7 @@ export function registerIpcHandlers() {
   registerCategoryHandlers();
   registerMenuHandlers();
   registerOrderHandlers();
+  registerPaymentHandlers();
   registerCustomerHandlers();
   registerReportHandlers();
   registerSettingsHandlers();

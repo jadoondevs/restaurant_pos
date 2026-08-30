@@ -48,6 +48,12 @@ const api = {
   orderDelete: (id: number) => ipcRenderer.invoke('orders:delete', id),
   orderPeekReceiptNumber: () => ipcRenderer.invoke('orders:peekReceiptNumber'),
 
+  // Payments
+  paymentsList: (orderId: number) => ipcRenderer.invoke('payments:list', orderId),
+  paymentsRecord: (data: unknown) => ipcRenderer.invoke('payments:record', data),
+  paymentsUpdate: (data: unknown) => ipcRenderer.invoke('payments:update', data),
+  paymentsDelete: (id: number) => ipcRenderer.invoke('payments:delete', id),
+
   // Customers
   customersList: (search?: string) => ipcRenderer.invoke('customers:list', search),
   customerCreate: (data: unknown) => ipcRenderer.invoke('customers:create', data),

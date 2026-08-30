@@ -4,6 +4,7 @@ import type {
   Category,
   MenuItem,
   Order,
+  Payment,
   Customer,
   Settings,
   DashboardStats,
@@ -71,6 +72,19 @@ export const api = {
   getOrder: (id: number) => unwrap<Order>(window.api.orderGet(id)),
   deleteOrder: (id: number) => unwrap(window.api.orderDelete(id)),
   peekReceiptNumber: () => unwrap<string>(window.api.orderPeekReceiptNumber()),
+
+  // Payments
+  listPayments: (orderId: number) => unwrap<Payment[]>(window.api.paymentsList(orderId)),
+  recordPayment: (data: {
+    orderId: number;
+    method: string;
+    amount: number;
+    paymentAccountId?: number | null;
+    recordedBy?: string | null;
+  }) => unwrap<Payment>(window.api.paymentsRecord(data)),
+  updatePayment: (data: { id: number; method?: string; amount?: number; paymentAccountId?: number | null }) =>
+    unwrap<Payment>(window.api.paymentsUpdate(data)),
+  deletePayment: (id: number) => unwrap(window.api.paymentsDelete(id)),
 
   // Customers
   listCustomers: (search?: string) => unwrap<Customer[]>(window.api.customersList(search)),

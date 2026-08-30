@@ -1,7 +1,7 @@
 // Ambient declaration for the API exposed by the preload bridge.
 // Every method returns the IpcResult envelope from the main process.
 
-import type { AuthUser, PrintResult, UserRecord } from './index';
+import type { AuthUser, PrintResult, UserRecord, Payment } from './index';
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -60,6 +60,23 @@ export interface ElectronApi {
   orderGet(id: number): Promise<IpcResult<any>>;
   orderDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
   orderPeekReceiptNumber(): Promise<IpcResult<string>>;
+
+  // Payments
+  paymentsList(orderId: number): Promise<IpcResult<Payment[]>>;
+  paymentsRecord(data: {
+    orderId: number;
+    method: string;
+    amount: number;
+    paymentAccountId?: number | null;
+    recordedBy?: string | null;
+  }): Promise<IpcResult<Payment>>;
+  paymentsUpdate(data: {
+    id: number;
+    method?: string;
+    amount?: number;
+    paymentAccountId?: number | null;
+  }): Promise<IpcResult<Payment>>;
+  paymentsDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
 
   // Customers
   customersList(search?: string): Promise<IpcResult<any[]>>;

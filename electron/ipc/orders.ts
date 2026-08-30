@@ -1,6 +1,13 @@
 import prisma from '../database/client';
 import { handle } from './util';
 import { resolveDateRange, startOfLocalDay } from '../utils/dateRange';
+import {
+  calculateServiceCharge,
+  calculateTotalDue,
+  computePaymentStatus,
+  isValidServiceChargeType,
+  type ServiceChargeType,
+} from '../utils/billing';
 
 interface OrderItemInput {
   menuItemId?: number | null;
@@ -18,6 +25,8 @@ interface OrderInput {
   tableNumber?: string | null;
   customerId?: number | null;
   cashierName?: string | null;
+  serviceChargeType?: string;
+  serviceChargeValue?: number;
 }
 
 interface ListParams {
@@ -71,8 +80,32 @@ export function registerOrderHandlers() {
     const taxable = subtotal - discount;
     const taxAmount = +(taxable * (taxRate / 100)).toFixed(2);
     const grandTotal = +(taxable + taxAmount).toFixed(2);
-    const cashReceived = input.cashReceived ?? grandTotal;
-    const change = +(Math.max(0, cashReceived - grandTotal)).toFixed(2);
+
+    // Service charge — computed from grandTotal, persisted permanently.
+    // See electron/utils/billing.ts for the NONE/FIXED/PERCENTAGE rules.
+    const serviceChargeType: ServiceChargeType = isValidServiceChargeType(input.serviceChargeType)
+      ? input.serviceChargeType
+      : 'NONE';
+    const serviceChargeValue = Math.max(0, input.serviceChargeValue ?? 0);
+    const serviceChargeAmount = calculateServiceCharge(serviceChargeType, serviceChargeValue, grandTotal);
+    const totalDue = calculateTotalDue(grandTotal, serviceChargeAmount);
+
+    // cashReceived/change remain strictly tender/change-making fields, now
+    // measured against totalDue (grandTotal + serviceChargeAmount) so they
+    // stay meaningful once a service charge is present. They are NOT the
+    // authoritative payment ledger — the Payment row created below is.
+    const cashReceived = input.cashReceived ?? totalDue;
+    const change = +(Math.max(0, cashReceived - totalDue)).toFixed(2);
+
+    // The existing checkout flow always collects cash at the point of sale.
+    // Payment.amount is the net amount actually applied toward the bill —
+    // never more than totalDue (anything beyond that is change, already
+    // captured above). A caller that explicitly passes cashReceived <= 0
+    // (the future "print now, pay later" flow) creates no Payment row yet,
+    // leaving the order PENDING for payments:record to settle afterward.
+    const paymentAmount = +Math.min(Math.max(0, cashReceived), totalDue).toFixed(2);
+    const initialPaymentStatus =
+      paymentAmount > 0 ? computePaymentStatus(totalDue, [{ amount: paymentAmount }]) : 'PENDING';
 
     return prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -108,6 +141,10 @@ export function registerOrderHandlers() {
           customerId: input.customerId || null,
           cashierName: input.cashierName || null,
           status: 'completed',
+          serviceChargeType,
+          serviceChargeValue,
+          serviceChargeAmount,
+          paymentStatus: initialPaymentStatus,
           items: {
             create: input.items.map((item) => ({
               menuItemId: item.menuItemId || null,
@@ -118,8 +155,22 @@ export function registerOrderHandlers() {
               lineTotal: +(item.price * item.quantity).toFixed(2),
             })),
           },
+          ...(paymentAmount > 0
+            ? {
+                payments: {
+                  create: [
+                    {
+                      method: 'CASH',
+                      amount: paymentAmount,
+                      isLegacyPayment: false,
+                      recordedBy: input.cashierName || null,
+                    },
+                  ],
+                },
+              }
+            : {}),
         },
-        include: { items: true, customer: true },
+        include: { items: true, customer: true, payments: true },
       });
     });
   });

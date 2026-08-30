@@ -83,6 +83,9 @@ export interface OrderItem {
   lineTotal: number;
 }
 
+export type ServiceChargeType = 'NONE' | 'FIXED' | 'PERCENTAGE';
+export type PaymentStatus = 'PENDING' | 'PARTIAL' | 'PAID';
+
 export interface Order {
   id: number;
   receiptNumber: string;
@@ -101,6 +104,33 @@ export interface Order {
   customer?: Customer | null;
   items: OrderItem[];
   createdAt: string;
+  serviceChargeType: ServiceChargeType;
+  serviceChargeValue: number;
+  serviceChargeAmount: number;
+  paymentStatus: PaymentStatus;
+  payments?: Payment[];
+}
+
+/**
+ * Actual, historical payment record — separate from PaymentAccount (the
+ * live, admin-configured list of what the restaurant currently accepts).
+ * accountDisplayName/accountNumberSnap/ibanSnap are frozen at the moment
+ * this row was created and never change even if the source PaymentAccount
+ * is later edited or removed.
+ */
+export interface Payment {
+  id: number;
+  orderId: number;
+  paymentAccountId: number | null;
+  method: string;
+  amount: number;
+  accountDisplayName: string | null;
+  accountNumberSnap: string | null;
+  ibanSnap: string | null;
+  isLegacyPayment: boolean;
+  recordedBy: string | null;
+  recordedAt: string;
+  updatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
