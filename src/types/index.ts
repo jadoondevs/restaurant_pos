@@ -396,3 +396,21 @@ export interface ServiceChargeReport {
   periodTotal: number;
   orderCount: number;
 }
+
+// ---------------------------------------------------------------------------
+// Menu bulk import (Batch 7)
+// ---------------------------------------------------------------------------
+
+export interface BulkImportRow {
+  name: string;
+  categoryName: string;
+  price: number | string;
+  description?: string;
+  ownerships?: { partnerName: string; percentage: number }[];
+}
+
+export interface BulkImportResult {
+  created: number;
+  skipped: { row: number; name: string; reason: string }[];
+  warnings: { row: number; name: string; message: string }[];
+}

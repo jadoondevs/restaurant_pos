@@ -17,6 +17,8 @@ import type {
   PartnerReport,
   PaymentReport,
   ServiceChargeReport,
+  BulkImportRow,
+  BulkImportResult,
   PrintResult,
   BackupStatus,
   BackupRecord,
@@ -71,6 +73,8 @@ export const api = {
   updateMenuItem: (id: number, data: Partial<MenuItem>) =>
     unwrap<MenuItem>(window.api.menuUpdate(id, data)),
   deleteMenuItem: (id: number) => unwrap(window.api.menuDelete(id)),
+  bulkImportMenu: (rows: BulkImportRow[]) =>
+    unwrap<BulkImportResult>(window.api.menuBulkImport({ rows })),
 
   // Partners
   listPartners: (activeOnly?: boolean) => unwrap<Partner[]>(window.api.partnersList(activeOnly)),

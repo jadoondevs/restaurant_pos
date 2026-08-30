@@ -1,21 +1,41 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Search, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, X, Upload } from 'lucide-react';
 import { api } from '@/services/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatCurrency } from '@/utils/format';
+import { compressImage } from '@/utils/image';
+import { parseCsvToObjects } from '@/utils/csv';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea, Select } from '@/components/ui/Input';
 import { Modal, ConfirmDialog } from '@/components/ui/Modal';
-import { PageHeader, EmptyState, PageLoader, Badge } from '@/components/ui/Misc';
-import type { Category, MenuItem, Partner } from '@/types';
+import { PageHeader, EmptyState, PageLoader, Badge, Spinner } from '@/components/ui/Misc';
+import type { Category, MenuItem, Partner, BulkImportRow, BulkImportResult } from '@/types';
 
 interface OwnershipRow {
   partnerId: number | '';
   percentage: string;
+}
+
+interface ImportPreviewRow extends BulkImportRow {
+  errors: string[];
+}
+
+/** Parses "Partner A:50,Partner B:50" into ownership pairs. Returns null on malformed input. */
+function parseOwnershipSpec(spec: string): { partnerName: string; percentage: number }[] | null {
+  if (!spec.trim()) return [];
+  const pairs = spec.split(',').map((s) => s.trim()).filter(Boolean);
+  const parsed: { partnerName: string; percentage: number }[] = [];
+  for (const pair of pairs) {
+    const [name, pct] = pair.split(':').map((s) => s.trim());
+    const percentage = parseFloat(pct);
+    if (!name || !Number.isFinite(percentage) || percentage <= 0) return null;
+    parsed.push({ partnerName: name, percentage });
+  }
+  return parsed;
 }
 
 interface FormState {
@@ -61,6 +81,12 @@ export function Menu() {
   const [savingOwnership, setSavingOwnership] = useState(false);
   const [newPartnerName, setNewPartnerName] = useState('');
   const [addingPartner, setAddingPartner] = useState(false);
+
+  // Bulk import
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<BulkImportResult | null>(null);
 
   const loadItems = () =>
     api
@@ -111,11 +137,14 @@ export function Menu() {
     setFormOpen(true);
   };
 
-  const handleImage = (file: File | undefined) => {
+  const handleImage = async (file: File | undefined) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setForm((f) => ({ ...f, image: reader.result as string }));
-    reader.readAsDataURL(file);
+    try {
+      const dataUrl = await compressImage(file);
+      setForm((f) => ({ ...f, image: dataUrl }));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to process image.', 'error');
+    }
   };
 
   const save = async () => {
@@ -160,6 +189,92 @@ export function Menu() {
       loadItems();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Delete failed.', 'error');
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Bulk import — CSV columns: name, category, price, description (optional),
+  // partnerOwnership (optional, "Partner A:50,Partner B:50"). Header names
+  // are matched case-insensitively; only structurally valid rows are sent
+  // to the server, which re-validates and reports per-row results.
+  // ---------------------------------------------------------------------------
+  const openImport = () => {
+    setImportRows([]);
+    setImportResult(null);
+    setImportOpen(true);
+  };
+
+  const handleImportFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const objects = parseCsvToObjects(text);
+      if (objects.length === 0) {
+        toast('The file has no data rows.', 'error');
+        return;
+      }
+
+      const get = (row: Record<string, string>, key: string) =>
+        Object.entries(row).find(([k]) => k.toLowerCase() === key.toLowerCase())?.[1]?.trim() ?? '';
+
+      const categoryNames = new Set(categories.map((c) => c.name.toLowerCase()));
+
+      const rows: ImportPreviewRow[] = objects.map((row) => {
+        const name = get(row, 'name');
+        const categoryName = get(row, 'category');
+        const priceStr = get(row, 'price');
+        const description = get(row, 'description');
+        const ownershipStr = get(row, 'partnerOwnership');
+
+        const errors: string[] = [];
+        if (!name) errors.push('Missing name');
+        if (!categoryName) errors.push('Missing category');
+        else if (!categoryNames.has(categoryName.toLowerCase())) errors.push(`Unknown category "${categoryName}"`);
+        const price = parseFloat(priceStr);
+        if (!priceStr || Number.isNaN(price) || price < 0) errors.push(`Invalid price "${priceStr}"`);
+
+        const ownerships = ownershipStr ? parseOwnershipSpec(ownershipStr) : [];
+        if (ownershipStr && ownerships === null) errors.push('Malformed partner ownership');
+
+        return {
+          name,
+          categoryName,
+          price: priceStr,
+          description,
+          ownerships: ownerships ?? [],
+          errors,
+        };
+      });
+
+      setImportRows(rows);
+      setImportResult(null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to read file.', 'error');
+    }
+  };
+
+  const validImportRows = importRows.filter((r) => r.errors.length === 0);
+
+  const confirmImport = async () => {
+    if (validImportRows.length === 0) return;
+    setImporting(true);
+    try {
+      const result = await api.bulkImportMenu(
+        validImportRows.map((r) => ({
+          name: r.name,
+          categoryName: r.categoryName,
+          price: parseFloat(String(r.price)),
+          description: r.description,
+          ownerships: r.ownerships,
+        }))
+      );
+      setImportResult(result);
+      setImportRows([]);
+      loadItems();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Import failed.', 'error');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -228,9 +343,14 @@ export function Menu() {
         title="Menu"
         subtitle="Manage your menu items"
         action={canManage ? (
-          <Button onClick={openCreate} disabled={categories.length === 0}>
-            <Plus size={18} /> New Item
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={openImport}>
+              <Upload size={18} /> Import CSV
+            </Button>
+            <Button onClick={openCreate} disabled={categories.length === 0}>
+              <Plus size={18} /> New Item
+            </Button>
+          </div>
         ) : undefined}
       />
 
@@ -489,6 +609,124 @@ export function Menu() {
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />}
+
+      {canManage && (
+        <Modal
+          open={importOpen}
+          title="Bulk Import Menu Items"
+          onClose={() => setImportOpen(false)}
+          maxWidth="max-w-3xl"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setImportOpen(false)}>
+                Close
+              </Button>
+              {importRows.length > 0 && (
+                <Button onClick={confirmImport} disabled={importing || validImportRows.length === 0}>
+                  {importing ? <Spinner className="h-5 w-5" /> : `Import ${validImportRows.length} Item(s)`}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div className="space-y-4">
+            {!importResult && (
+              <>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  CSV columns: <code>name</code>, <code>category</code>, <code>price</code>,{' '}
+                  <code>description</code> (optional), <code>partnerOwnership</code> (optional, e.g.{' '}
+                  <code>Partner A:50,Partner B:50</code>). Category names must already exist.
+                </p>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => handleImportFile(e.target.files?.[0])}
+                  className="text-sm text-slate-500"
+                />
+              </>
+            )}
+
+            {importRows.length > 0 && (
+              <>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  {validImportRows.length} of {importRows.length} row(s) are valid and will be imported.
+                </p>
+                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Row</th>
+                        <th className="px-3 py-2 font-medium">Name</th>
+                        <th className="px-3 py-2 font-medium">Category</th>
+                        <th className="px-3 py-2 font-medium">Price</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importRows.map((r, i) => (
+                        <tr
+                          key={i}
+                          className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${
+                            r.errors.length ? 'bg-red-50 dark:bg-red-900/10' : ''
+                          }`}
+                        >
+                          <td className="px-3 py-1.5 text-slate-400">{i + 2}</td>
+                          <td className="px-3 py-1.5">{r.name || '—'}</td>
+                          <td className="px-3 py-1.5">{r.categoryName || '—'}</td>
+                          <td className="px-3 py-1.5">{r.price || '—'}</td>
+                          <td className="px-3 py-1.5">
+                            {r.errors.length ? (
+                              <span className="text-xs text-red-600 dark:text-red-400">
+                                {r.errors.join('; ')}
+                              </span>
+                            ) : (
+                              <Badge tone="green">Ready</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {importResult && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                  {importResult.created} item(s) created.
+                </p>
+                {importResult.skipped.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                      {importResult.skipped.length} row(s) skipped:
+                    </p>
+                    <ul className="mt-1 max-h-32 overflow-auto text-xs text-slate-500">
+                      {importResult.skipped.map((s, i) => (
+                        <li key={i}>
+                          Row {s.row} ({s.name || 'unnamed'}): {s.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {importResult.warnings.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Warnings:</p>
+                    <ul className="mt-1 max-h-32 overflow-auto text-xs text-slate-500">
+                      {importResult.warnings.map((w, i) => (
+                        <li key={i}>
+                          Row {w.row} ({w.name}): {w.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

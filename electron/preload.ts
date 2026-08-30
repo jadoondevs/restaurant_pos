@@ -40,6 +40,7 @@ const api = {
   menuCreate: (data: unknown) => ipcRenderer.invoke('menu:create', data),
   menuUpdate: (id: number, data: unknown) => ipcRenderer.invoke('menu:update', { id, data }),
   menuDelete: (id: number) => ipcRenderer.invoke('menu:delete', id),
+  menuBulkImport: (data: unknown) => ipcRenderer.invoke('menu:bulkImport', data),
 
   // Partners
   partnersList: (activeOnly?: boolean) => ipcRenderer.invoke('partners:list', activeOnly),

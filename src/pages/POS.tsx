@@ -360,6 +360,13 @@ export function POS() {
                   onClick={() => cart.addItem(item)}
                   className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-brand-400 hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
                 >
+                  {item.image && (
+                    <img
+                      src={item.image}
+                      alt=""
+                      className="mb-2 h-24 w-full rounded-lg object-cover"
+                    />
+                  )}
                   <span className="line-clamp-2 font-medium text-slate-900 dark:text-slate-100">
                     {item.name}
                   </span>

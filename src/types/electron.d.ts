@@ -61,6 +61,7 @@ export interface ElectronApi {
   menuCreate(data: unknown): Promise<IpcResult<any>>;
   menuUpdate(id: number, data: unknown): Promise<IpcResult<any>>;
   menuDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
+  menuBulkImport(data: unknown): Promise<IpcResult<any>>;
 
   // Partners
   partnersList(activeOnly?: boolean): Promise<IpcResult<Partner[]>>;
