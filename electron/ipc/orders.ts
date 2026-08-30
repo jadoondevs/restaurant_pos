@@ -1,5 +1,6 @@
 import prisma from '../database/client';
 import { handle } from './util';
+import { resolveDateRange, startOfLocalDay } from '../utils/dateRange';
 
 interface OrderItemInput {
   menuItemId?: number | null;
@@ -127,13 +128,15 @@ export function registerOrderHandlers() {
     const where: Record<string, unknown> = {};
 
     if (params.from || params.to) {
+      // resolveDateRange() expands a date-only value ("2026-08-27") to the
+      // full inclusive local day instead of truncating it to local midnight,
+      // which used to silently drop most of that day's orders.
+      const range = resolveDateRange({ from: params.from, to: params.to });
       where.createdAt = {};
-      if (params.from) (where.createdAt as Record<string, unknown>).gte = new Date(params.from);
-      if (params.to) (where.createdAt as Record<string, unknown>).lte = new Date(params.to);
+      if (params.from) (where.createdAt as Record<string, unknown>).gte = range.gte;
+      if (params.to) (where.createdAt as Record<string, unknown>).lte = range.lte;
     } else {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      where.createdAt = { gte: start };
+      where.createdAt = { gte: startOfLocalDay() };
     }
 
     if (params.search?.trim()) {

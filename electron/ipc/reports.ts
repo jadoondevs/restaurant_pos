@@ -1,22 +1,17 @@
 import prisma from '../database/client';
 import { handle } from './util';
+import { resolveDateRange, startOfLocalDay } from '../utils/dateRange';
 
 interface RangeParams {
   from: string;
   to: string;
 }
 
-function startOfToday() {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-
 export function registerReportHandlers() {
   // Unrestricted — any authenticated user can see today's overview.
   handle('reports:dashboard', async (_event) => {
-    const start = startOfToday();
     const orders = await prisma.order.findMany({
-      where: { createdAt: { gte: start } },
+      where: { createdAt: { gte: startOfLocalDay() } },
       select: { grandTotal: true, tableNumber: true, status: true },
     });
 
@@ -36,8 +31,9 @@ export function registerReportHandlers() {
 
   // MANAGER and above — detailed financial reports.
   handle('reports:summary', async (_event, { from, to }: RangeParams) => {
+    const range = resolveDateRange({ from, to });
     const orders = await prisma.order.findMany({
-      where: { createdAt: { gte: new Date(from), lte: new Date(to) } },
+      where: { createdAt: { gte: range.gte, lte: range.lte } },
       select: { grandTotal: true, subtotal: true, discount: true, taxAmount: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -65,9 +61,10 @@ export function registerReportHandlers() {
   }, { requiredRole: 'MANAGER' });
 
   handle('reports:topItems', async (_event, { from, to }: RangeParams) => {
+    const range = resolveDateRange({ from, to });
     const grouped = await prisma.orderItem.groupBy({
       by: ['name'],
-      where: { order: { createdAt: { gte: new Date(from), lte: new Date(to) } } },
+      where: { order: { createdAt: { gte: range.gte, lte: range.lte } } },
       _sum: { quantity: true, lineTotal: true },
       orderBy: { _sum: { quantity: 'desc' } },
       take: 15,
