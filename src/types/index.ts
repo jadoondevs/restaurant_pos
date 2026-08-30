@@ -331,3 +331,68 @@ export interface ReceiptData {
   cashReceived: number;
   change: number;
 }
+
+// ---------------------------------------------------------------------------
+// Partner / payment / service-charge reports (Batch 6)
+// ---------------------------------------------------------------------------
+
+export interface PartnerReportItem {
+  name: string;
+  quantity: number;
+  sales: number;
+  effectivePercentage: number;
+  partnerShare: number;
+}
+
+export interface PartnerReportEntry {
+  partnerId: number | null;
+  partnerName: string;
+  items: PartnerReportItem[];
+  totalShare: number;
+}
+
+export interface PartnerReport {
+  partners: PartnerReportEntry[];
+  grandTotal: number;
+}
+
+export interface PaymentReportRow {
+  id: number;
+  orderId: number;
+  receiptNumber: string;
+  method: string;
+  accountDisplayName: string | null;
+  amount: number;
+  recordedAt: string;
+  recordedBy: string | null;
+}
+
+export interface PaymentReportMethodGroup {
+  method: string;
+  accountDisplayName: string | null;
+  amount: number;
+  count: number;
+}
+
+export interface PaymentReport {
+  payments: PaymentReportRow[];
+  byMethod: PaymentReportMethodGroup[];
+  totals: { totalCash: number; totalOnline: number; totalCollected: number };
+}
+
+export interface ServiceChargeOrderRow {
+  id: number;
+  receiptNumber: string;
+  createdAt: string;
+  serviceChargeType: ServiceChargeType;
+  serviceChargeValue: number;
+  serviceChargeAmount: number;
+  cashierName: string | null;
+}
+
+export interface ServiceChargeReport {
+  orders: ServiceChargeOrderRow[];
+  daily: { date: string; total: number; count: number }[];
+  periodTotal: number;
+  orderCount: number;
+}

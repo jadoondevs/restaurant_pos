@@ -82,6 +82,9 @@ const api = {
   reportSummary: (params: unknown) => ipcRenderer.invoke('reports:summary', params),
   reportTopItems: (params: unknown) => ipcRenderer.invoke('reports:topItems', params),
   reportConsumption: (params: unknown) => ipcRenderer.invoke('reports:consumption', params),
+  reportPartners: (params: unknown) => ipcRenderer.invoke('reports:partners', params),
+  reportPayments: (params: unknown) => ipcRenderer.invoke('reports:payments', params),
+  reportServiceCharges: (params: unknown) => ipcRenderer.invoke('reports:serviceCharges', params),
 
   // Settings
   settingsGet: () => ipcRenderer.invoke('settings:get'),

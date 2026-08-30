@@ -14,6 +14,9 @@ import type {
   ReportSummary,
   TopItem,
   ConsumptionReport,
+  PartnerReport,
+  PaymentReport,
+  ServiceChargeReport,
   PrintResult,
   BackupStatus,
   BackupRecord,
@@ -128,6 +131,12 @@ export const api = {
     type?: 'OWNER' | 'EMPLOYEE';
     personId?: number;
   }) => unwrap<ConsumptionReport>(window.api.reportConsumption(params)),
+  partnerReport: (params: { from: string; to: string; partnerId?: number }) =>
+    unwrap<PartnerReport>(window.api.reportPartners(params)),
+  paymentReport: (params: { from: string; to: string; method?: string }) =>
+    unwrap<PaymentReport>(window.api.reportPayments(params)),
+  serviceChargeReport: (params: { from: string; to: string }) =>
+    unwrap<ServiceChargeReport>(window.api.reportServiceCharges(params)),
 
   // Settings
   getSettings: () => unwrap<Settings>(window.api.settingsGet()),

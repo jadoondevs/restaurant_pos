@@ -160,4 +160,187 @@ export function registerReportHandlers() {
     },
     { requiredRole: 'MANAGER' }
   );
+
+  // Partner report — reads OrderItemPartnerAllocation exclusively (the
+  // frozen historical snapshot from Batch 4), never the live MenuItemPartner
+  // config, so a later ownership change never alters a past period's report.
+  handle(
+    'reports:partners',
+    async (_event, { from, to, partnerId }: RangeParams & { partnerId?: number }) => {
+      const range = resolveDateRange({ from, to });
+
+      const allocations = await prisma.orderItemPartnerAllocation.findMany({
+        where: {
+          order: { createdAt: { gte: range.gte, lte: range.lte } },
+          ...(partnerId ? { partnerId } : {}),
+        },
+        include: { orderItem: true, order: { select: { receiptNumber: true, createdAt: true } } },
+      });
+
+      interface ItemLine {
+        name: string;
+        quantity: number;
+        sales: number;
+        partnerShare: number;
+      }
+      interface PartnerGroup {
+        partnerId: number | null;
+        partnerName: string;
+        items: Map<string, ItemLine>;
+        totalShare: number;
+      }
+      const byPartner = new Map<string, PartnerGroup>();
+
+      for (const a of allocations) {
+        const pKey = String(a.partnerId ?? 'null');
+        const partner = byPartner.get(pKey) ?? {
+          partnerId: a.partnerId,
+          partnerName: a.partnerName,
+          items: new Map<string, ItemLine>(),
+          totalShare: 0,
+        };
+        const line = partner.items.get(a.orderItem.name) ?? {
+          name: a.orderItem.name,
+          quantity: 0,
+          sales: 0,
+          partnerShare: 0,
+        };
+        line.quantity += a.orderItem.quantity;
+        line.sales += a.orderItem.lineTotal;
+        line.partnerShare += a.amount;
+        partner.items.set(a.orderItem.name, line);
+        partner.totalShare += a.amount;
+        byPartner.set(pKey, partner);
+      }
+
+      const partners = [...byPartner.values()].map((p) => ({
+        partnerId: p.partnerId,
+        partnerName: p.partnerName,
+        items: [...p.items.values()].map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          sales: +i.sales.toFixed(2),
+          effectivePercentage: i.sales > 0 ? +((i.partnerShare / i.sales) * 100).toFixed(1) : 0,
+          partnerShare: +i.partnerShare.toFixed(2),
+        })),
+        totalShare: +p.totalShare.toFixed(2),
+      }));
+
+      return {
+        partners,
+        grandTotal: +partners.reduce((sum, p) => sum + p.totalShare, 0).toFixed(2),
+      };
+    },
+    { requiredRole: 'MANAGER' }
+  );
+
+  // Payment report — reads Payment exclusively, filtered by when each
+  // payment was actually recorded (not the order's createdAt), so a
+  // payment settled days after the order lands in the right period.
+  handle(
+    'reports:payments',
+    async (_event, { from, to, method }: RangeParams & { method?: string }) => {
+      const range = resolveDateRange({ from, to });
+
+      const payments = await prisma.payment.findMany({
+        where: {
+          recordedAt: { gte: range.gte, lte: range.lte },
+          ...(method ? { method } : {}),
+        },
+        include: { order: { select: { receiptNumber: true } } },
+        orderBy: { recordedAt: 'desc' },
+      });
+
+      interface MethodGroup {
+        method: string;
+        accountDisplayName: string | null;
+        amount: number;
+        count: number;
+      }
+      const byMethod = new Map<string, MethodGroup>();
+      let totalCash = 0;
+      let totalCollected = 0;
+
+      for (const p of payments) {
+        const key = `${p.method}:${p.accountDisplayName ?? ''}`;
+        const entry = byMethod.get(key) ?? {
+          method: p.method,
+          accountDisplayName: p.accountDisplayName,
+          amount: 0,
+          count: 0,
+        };
+        entry.amount += p.amount;
+        entry.count += 1;
+        byMethod.set(key, entry);
+
+        totalCollected += p.amount;
+        if (p.method === 'CASH') totalCash += p.amount;
+      }
+
+      return {
+        payments: payments.map((p) => ({
+          id: p.id,
+          orderId: p.orderId,
+          receiptNumber: p.order.receiptNumber,
+          method: p.method,
+          accountDisplayName: p.accountDisplayName,
+          amount: p.amount,
+          recordedAt: p.recordedAt,
+          recordedBy: p.recordedBy,
+        })),
+        byMethod: [...byMethod.values()]
+          .map((m) => ({ ...m, amount: +m.amount.toFixed(2) }))
+          .sort((a, b) => b.amount - a.amount),
+        totals: {
+          totalCash: +totalCash.toFixed(2),
+          totalOnline: +(totalCollected - totalCash).toFixed(2),
+          totalCollected: +totalCollected.toFixed(2),
+        },
+      };
+    },
+    { requiredRole: 'MANAGER' }
+  );
+
+  // Service charge report — kept entirely separate from sales/revenue
+  // figures everywhere else, per the approved billing design.
+  handle(
+    'reports:serviceCharges',
+    async (_event, { from, to }: RangeParams) => {
+      const range = resolveDateRange({ from, to });
+
+      const orders = await prisma.order.findMany({
+        where: { createdAt: { gte: range.gte, lte: range.lte }, serviceChargeAmount: { gt: 0 } },
+        select: {
+          id: true,
+          receiptNumber: true,
+          createdAt: true,
+          serviceChargeType: true,
+          serviceChargeValue: true,
+          serviceChargeAmount: true,
+          cashierName: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const byDay: Record<string, { date: string; total: number; count: number }> = {};
+      for (const o of orders) {
+        const key = o.createdAt.toISOString().slice(0, 10);
+        byDay[key] ??= { date: key, total: 0, count: 0 };
+        byDay[key].total += o.serviceChargeAmount;
+        byDay[key].count += 1;
+      }
+
+      const periodTotal = orders.reduce((sum, o) => sum + o.serviceChargeAmount, 0);
+
+      return {
+        orders,
+        daily: Object.values(byDay)
+          .map((d) => ({ ...d, total: +d.total.toFixed(2) }))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+        periodTotal: +periodTotal.toFixed(2),
+        orderCount: orders.length,
+      };
+    },
+    { requiredRole: 'MANAGER' }
+  );
 }

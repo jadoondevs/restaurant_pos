@@ -114,6 +114,9 @@ export interface ElectronApi {
   reportSummary(params: unknown): Promise<IpcResult<any>>;
   reportTopItems(params: unknown): Promise<IpcResult<any[]>>;
   reportConsumption(params: unknown): Promise<IpcResult<any>>;
+  reportPartners(params: unknown): Promise<IpcResult<any>>;
+  reportPayments(params: unknown): Promise<IpcResult<any>>;
+  reportServiceCharges(params: unknown): Promise<IpcResult<any>>;
 
   // Settings
   settingsGet(): Promise<IpcResult<any>>;
