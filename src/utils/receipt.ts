@@ -76,8 +76,8 @@ export function buildReceiptHtml(
   body {
     width: ${bodyWidth};
     font-family: 'Courier New', monospace;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
     -webkit-font-smoothing: antialiased;
     color: #000;
     padding: ${bodyPadding};
@@ -89,29 +89,29 @@ export function buildReceiptHtml(
     padding: ${isA4 ? '12px 8px' : '0'};
   }
   .center { text-align: center; }
-  .bold { font-weight: 800; }
-  .title { font-size: 17px; font-weight: 800; }
-  .muted { font-size: 11px; }
+  .bold { font-weight: 900; }
+  .title { font-size: 18px; font-weight: 900; }
+  .muted { font-size: 12px; }
   hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 2px 0; vertical-align: top; }
   th.qty, td.qty { text-align: center; width: 28px; }
   th.unit, td.unit { text-align: right; width: 56px; }
   th.amt, td.amt { text-align: right; width: 60px; }
-  .note { font-size: 10px; font-style: italic; padding-left: 6px; }
+  .note { font-size: 11px; font-style: italic; padding-left: 6px; }
   .totals td { padding: 1px 0; }
   .totals .label { text-align: left; }
   .totals .val { text-align: right; }
-  .grand { font-size: 14px; font-weight: bold; }
-  .footer { margin-top: 8px; font-size: 11px; }
+  .grand { font-size: 16px; font-weight: 900; }
+  .footer { margin-top: 8px; font-size: 12px; }
   .logo { max-width: 60px; max-height: 60px; margin: 0 auto 4px; display: block; }
   .payopt { margin-top: 4px; }
-  .payopt .heading { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
-  .payopt .line { font-size: 11px; }
-  .social { margin-top: 4px; font-size: 11px; }
+  .payopt .heading { font-size: 12px; font-weight: bold; margin-bottom: 2px; }
+  .payopt .line { font-size: 12px; }
+  .social { margin-top: 4px; font-size: 12px; }
   .qr-wrap { margin-top: 8px; text-align: center; }
   .qr-wrap svg { width: 70px; height: 70px; }
-  .qr-wrap .qr-label { font-size: 10px; margin-top: 2px; }
+  .qr-wrap .qr-label { font-size: 11px; margin-top: 2px; }
   .due { color: #000; }
   @media print {
     body { width: ${bodyWidth}; }
