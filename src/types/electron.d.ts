@@ -137,6 +137,7 @@ export interface ElectronApi {
 
   // Printing — status is the literal union from PrintResult, not string.
   printReceipt(html: string): Promise<IpcResult<PrintResult>>;
+  printListPrinters(): Promise<IpcResult<any[]>>;
 
   // Backup
   backupStatus(): Promise<IpcResult<any>>;

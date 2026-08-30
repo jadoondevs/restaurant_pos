@@ -64,10 +64,21 @@ export function buildReceiptHtml(
 <meta charset="utf-8" />
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /*
+   * Batch 10 print-quality fix: BIXOLON SRP-350III test-diagnosed. Bumping
+   * weight/size here is the CSS half of the fix — the driver-level half
+   * (color:false, scaleFactor:100) lives in printService.ts. Heavier,
+   * slightly larger glyphs leave less anti-aliased gray edge relative to
+   * solid black core, so after the thermal driver dithers the rendered
+   * page down to 1-bit, more of each character survives as solid burn.
+   */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body {
     width: ${bodyWidth};
     font-family: 'Courier New', monospace;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    -webkit-font-smoothing: antialiased;
     color: #000;
     padding: ${bodyPadding};
     background: #fff;
@@ -78,10 +89,10 @@ export function buildReceiptHtml(
     padding: ${isA4 ? '12px 8px' : '0'};
   }
   .center { text-align: center; }
-  .bold { font-weight: bold; }
-  .title { font-size: 16px; font-weight: bold; }
+  .bold { font-weight: 800; }
+  .title { font-size: 17px; font-weight: 800; }
   .muted { font-size: 11px; }
-  hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+  hr { border: none; border-top: 2px dashed #000; margin: 6px 0; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 2px 0; vertical-align: top; }
   th.qty, td.qty { text-align: center; width: 28px; }

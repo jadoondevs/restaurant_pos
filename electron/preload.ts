@@ -107,6 +107,7 @@ const api = {
 
   // Printing
   printReceipt: (html: string) => ipcRenderer.invoke('print:receipt', html),
+  printListPrinters: () => ipcRenderer.invoke('print:listPrinters'),
 
   // Backup
   backupStatus: () => ipcRenderer.invoke('backup:status'),

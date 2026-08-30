@@ -8,6 +8,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
+// buildPrintOptions — mirrors electron/services/printService.ts exactly.
+// The Batch 10 print-quality fix (color:false, scaleFactor:100) and the
+// silent-auto-print deviceName logic both live in this one pure function,
+// so it's tested directly here rather than only through the mocked job flow.
+// ---------------------------------------------------------------------------
+function buildPrintOptions(deviceName: string | null) {
+  return {
+    silent: deviceName != null,
+    ...(deviceName != null ? { deviceName } : {}),
+    printBackground: true,
+    margins: { marginType: 'none' as const },
+    color: false,
+    scaleFactor: 100,
+  };
+}
+
+describe('buildPrintOptions', () => {
+  it('forces color:false and scaleFactor:100 regardless of deviceName (the darkness fix)', () => {
+    expect(buildPrintOptions(null).color).toBe(false);
+    expect(buildPrintOptions(null).scaleFactor).toBe(100);
+    expect(buildPrintOptions('BIXOLON_SRP_350III').color).toBe(false);
+    expect(buildPrintOptions('BIXOLON_SRP_350III').scaleFactor).toBe(100);
+  });
+
+  it('is silent:false with no deviceName when no printer is configured — preserves the original dialog', () => {
+    const opts = buildPrintOptions(null);
+    expect(opts.silent).toBe(false);
+    expect(opts).not.toHaveProperty('deviceName');
+  });
+
+  it('is silent:true with the deviceName set when a printer is configured', () => {
+    const opts = buildPrintOptions('BIXOLON_SRP_350III');
+    expect(opts.silent).toBe(true);
+    expect((opts as { deviceName?: string }).deviceName).toBe('BIXOLON_SRP_350III');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Minimal mock of the parts of Electron used by PrintService.
 // ---------------------------------------------------------------------------
 type PrintCallback = (success: boolean, failureReason?: string) => void;
@@ -65,17 +103,21 @@ class TestPrintService {
     return this.mockWindow;
   }
 
-  print(html: string): Promise<PrintResult> {
+  print(html: string, deviceName: string | null = null): Promise<PrintResult> {
     if (this.destroyed) {
       return Promise.resolve({ status: 'failed', error: 'Print service has been shut down.' });
     }
     const job = new Promise<PrintResult>((resolve) => {
-      this.queue = this.queue.then(() => this.runJob(html, resolve));
+      this.queue = this.queue.then(() => this.runJob(html, deviceName, resolve));
     });
     return job;
   }
 
-  private async runJob(html: string, resolve: (r: PrintResult) => void): Promise<void> {
+  private async runJob(
+    html: string,
+    deviceName: string | null,
+    resolve: (r: PrintResult) => void
+  ): Promise<void> {
     if (this.destroyed) {
       resolve({ status: 'failed', error: 'Print service has been shut down.' });
       return;
@@ -97,7 +139,7 @@ class TestPrintService {
       settle({ status: 'failed', error: 'Print timed out.' });
     }, 5000);
 
-    win.webContents.print({}, (success, failureReason) => {
+    win.webContents.print(buildPrintOptions(deviceName), (success, failureReason) => {
       if (success) settle({ status: 'printed' });
       else if (failureReason === 'cancelled') settle({ status: 'cancelled' });
       else settle({ status: 'failed', error: failureReason ?? 'Unknown' });
@@ -139,6 +181,28 @@ describe('PrintService', () => {
     const result = await svc.print('<html></html>');
     expect(result.status).toBe('failed');
     expect(result.error).toBe('No printer available');
+  });
+
+  it('passes silent:false, color:false, scaleFactor:100 with no deviceName configured', async () => {
+    const svc = new TestPrintService('success');
+    await svc.print('<html></html>');
+    const win = svc['getWindow']();
+    const [optsArg] = (win.webContents.print as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(optsArg).toMatchObject({ silent: false, color: false, scaleFactor: 100 });
+    expect(optsArg).not.toHaveProperty('deviceName');
+  });
+
+  it('passes silent:true and the configured deviceName through to webContents.print', async () => {
+    const svc = new TestPrintService('success');
+    await svc.print('<html></html>', 'BIXOLON_SRP_350III');
+    const win = svc['getWindow']();
+    const [optsArg] = (win.webContents.print as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(optsArg).toMatchObject({
+      silent: true,
+      deviceName: 'BIXOLON_SRP_350III',
+      color: false,
+      scaleFactor: 100,
+    });
   });
 
   it('serialises multiple jobs — all complete in order', async () => {

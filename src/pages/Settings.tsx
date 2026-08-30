@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Textarea, Select } from '@/components/ui/Input';
 import { Modal, ConfirmDialog } from '@/components/ui/Modal';
 import { PageHeader, PageLoader, Badge } from '@/components/ui/Misc';
-import type { Settings as SettingsType, SocialLink, PaymentAccount, SocialPlatform, PaymentMethodType } from '@/types';
+import type { Settings as SettingsType, SocialLink, PaymentAccount, SocialPlatform, PaymentMethodType, PrinterInfo } from '@/types';
 
 const SOCIAL_PLATFORMS: SocialPlatform[] = ['FACEBOOK', 'INSTAGRAM', 'TIKTOK', 'WHATSAPP', 'WEBSITE', 'OTHER'];
 const PAYMENT_TYPES: PaymentMethodType[] = ['CASH', 'EASYPAISA', 'BANK'];
@@ -67,6 +67,10 @@ export function Settings() {
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [accountForm, setAccountForm] = useState<Partial<PaymentAccount>>(emptyPaymentAccount);
 
+  // Receipt printer (Batch 10 — silent auto-print)
+  const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+  const [printersError, setPrintersError] = useState<string | null>(null);
+
   useEffect(() => {
     if (settings) {
       setForm(settings);
@@ -80,6 +84,13 @@ export function Settings() {
     if (!canEditSettings) return;
     api.listSocialLinks().then(setSocialLinks).catch((e) => toast(e.message, 'error'));
     api.listPaymentAccounts().then(setPaymentAccounts).catch((e) => toast(e.message, 'error'));
+    api
+      .listPrinters()
+      .then((list) => {
+        setPrinters(list);
+        setPrintersError(null);
+      })
+      .catch((e) => setPrintersError(e instanceof Error ? e.message : 'Could not list printers.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEditSettings]);
 
@@ -125,6 +136,7 @@ export function Settings() {
         serviceChargePresets,
         googleReviewUrl: form.googleReviewUrl,
         googleReviewOnReceipt: form.googleReviewOnReceipt,
+        printerDeviceName: form.printerDeviceName,
       });
       toast('Settings saved.', 'success');
     } catch (e) {
@@ -367,6 +379,37 @@ export function Settings() {
             </label>
           </div>
         </Card>
+
+        {canEditSettings && (
+          <Card>
+            <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+              Receipt Printer
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Choose a printer to print silently with no dialog on every sale. Leave unset to keep
+              the system print dialog (pick a printer manually each time).
+            </p>
+            <div className="space-y-2">
+              <Select
+                label="Printer"
+                value={form.printerDeviceName ?? ''}
+                onChange={(e) => setForm({ ...form, printerDeviceName: e.target.value || null })}
+              >
+                <option value="">Ask every time (system dialog)</option>
+                {printers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.displayName}
+                    {p.isDefault ? ' (default)' : ''}
+                  </option>
+                ))}
+              </Select>
+              {printersError && <p className="text-sm text-red-500">{printersError}</p>}
+              {!printersError && printers.length === 0 && (
+                <p className="text-sm text-slate-400">No printers detected.</p>
+              )}
+            </div>
+          </Card>
+        )}
 
         <Card>
           <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-slate-100">

@@ -192,6 +192,14 @@ export interface Settings {
   serviceChargePresets: string | null; // JSON array of numbers, e.g. "[50,100,150]"
   googleReviewUrl: string | null;
   googleReviewOnReceipt: boolean;
+  printerDeviceName: string | null; // system printer name for silent auto-print; null = ask via OS dialog
+}
+
+/** One installed printer, as returned by print:listPrinters. */
+export interface PrinterInfo {
+  name: string; // system-defined name — the value to save as Settings.printerDeviceName
+  displayName: string;
+  isDefault: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ import type {
   SocialLink,
   PaymentAccount,
   PrintResult,
+  PrinterInfo,
   BackupStatus,
   BackupRecord,
 } from '@/types';
@@ -166,6 +167,7 @@ export const api = {
 
   // Printing — returns PrintResult (never throws on cancel/fail, only on IPC error)
   printReceipt: (html: string) => unwrap<PrintResult>(window.api.printReceipt(html)),
+  listPrinters: () => unwrap<PrinterInfo[]>(window.api.printListPrinters()),
 
   // Backup
   backupStatus: () => unwrap<BackupStatus>(window.api.backupStatus()),

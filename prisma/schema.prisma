@@ -341,6 +341,13 @@ model Settings {
   serviceChargePresets  String? // JSON array of quick-pick amounts, e.g. "[50,100,150]"
   googleReviewUrl       String?
   googleReviewOnReceipt Boolean @default(false)
+
+  // --- Printing (Batch 10) ---
+  // System-defined printer name (Electron's PrinterInfo.name, not the
+  // "friendly" display name) selected in Settings for silent auto-print.
+  // Null means "no printer chosen yet" — print:receipt falls back to the
+  // original silent:false OS print dialog until an admin configures one.
+  printerDeviceName String?
 }
 
 // Monotonic per-day receipt counter — never resets, never reuses numbers.

@@ -19,6 +19,7 @@ interface SettingsInput {
   serviceChargePresets?: string | null; // JSON array of numbers, e.g. "[50,100,150]"
   googleReviewUrl?: string | null;
   googleReviewOnReceipt?: boolean;
+  printerDeviceName?: string | null;
 }
 
 async function ensureSettings() {
@@ -75,6 +76,7 @@ export function registerSettingsHandlers() {
         serviceChargePresets: data.serviceChargePresets,
         googleReviewUrl: data.googleReviewUrl?.trim() || null,
         googleReviewOnReceipt: data.googleReviewOnReceipt,
+        printerDeviceName: data.printerDeviceName === undefined ? undefined : data.printerDeviceName?.trim() || null,
       },
     });
   }, { requiredRole: 'ADMIN' });

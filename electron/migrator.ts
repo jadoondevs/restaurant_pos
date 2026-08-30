@@ -51,7 +51,7 @@ import { logger } from './logger';
 import { getDatabaseUrl } from './paths';
 import { createLocalBackup } from './backup/localBackup';
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 
 // Core tables that must exist for the app to function.
 // Presence of any one of these means the database is not empty.
@@ -595,6 +595,16 @@ const MIGRATIONS: MigrationStep[] = [
       logger.info(`migrator: v4 backfilled ${backfilled} legacy payment record(s)`, {
         totalOrders: orders.length,
       });
+    },
+  },
+  {
+    version: 5,
+    description: 'Add Settings.printerDeviceName for silent auto-print',
+    up: async (prisma) => {
+      if (!(await columnExists(prisma, 'Settings', 'printerDeviceName'))) {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Settings" ADD COLUMN "printerDeviceName" TEXT`);
+        logger.info('migrator: added Settings.printerDeviceName');
+      }
     },
   },
 ];
