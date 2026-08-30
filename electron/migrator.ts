@@ -31,6 +31,16 @@
  *   1. Increment CURRENT_VERSION.
  *   2. Add a new entry to the MIGRATIONS array.
  *   3. The step runs exactly once on the first boot after the upgrade.
+ *
+ *   4. PRE-MIGRATION BACKUP
+ *      Immediately before any pending migration step runs against an
+ *      existing (non-empty) database, a local backup is taken via the
+ *      existing local backup engine (VACUUM INTO, same mechanism used by
+ *      backupService). This is best-effort — a failed backup is logged
+ *      but never blocks the migration itself, since refusing to start the
+ *      app over a backup failure would be worse for a live restaurant than
+ *      proceeding with an additive, idempotent migration. Fresh installs
+ *      (nothing to back up yet) skip this step entirely.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -39,8 +49,9 @@ import { app } from 'electron';
 import type { PrismaClient } from '@prisma/client';
 import { logger } from './logger';
 import { getDatabaseUrl } from './paths';
+import { createLocalBackup } from './backup/localBackup';
 
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 4;
 
 // Core tables that must exist for the app to function.
 // Presence of any one of these means the database is not empty.
@@ -335,6 +346,257 @@ const MIGRATIONS: MigrationStep[] = [
       }
     },
   },
+  {
+    version: 3,
+    description: 'Add payments, partners, owner/employee consumption, and social link tables',
+    up: async (prisma) => {
+      // --- Partner ---------------------------------------------------------
+      if (!(await tableExists(prisma, 'Partner'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "Partner" (
+            "id"        INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "name"      TEXT NOT NULL,
+            "isActive"  INTEGER NOT NULL DEFAULT 1,
+            "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX "Partner_name_key" ON "Partner" ("name")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "Partner_isActive_idx" ON "Partner" ("isActive")`);
+        logger.info('migrator: created Partner table');
+      }
+
+      // --- MenuItemPartner (live ownership config) --------------------------
+      if (!(await tableExists(prisma, 'MenuItemPartner'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "MenuItemPartner" (
+            "id"         INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "menuItemId" INTEGER NOT NULL,
+            "partnerId"  INTEGER NOT NULL,
+            "percentage" REAL NOT NULL,
+            "createdAt"  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt"  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY ("menuItemId") REFERENCES "MenuItem" ("id") ON DELETE CASCADE,
+            FOREIGN KEY ("partnerId") REFERENCES "Partner" ("id") ON DELETE CASCADE
+          )
+        `);
+        await prisma.$executeRawUnsafe(
+          `CREATE UNIQUE INDEX "MenuItemPartner_menuItemId_partnerId_key" ON "MenuItemPartner" ("menuItemId", "partnerId")`
+        );
+        await prisma.$executeRawUnsafe(`CREATE INDEX "MenuItemPartner_menuItemId_idx" ON "MenuItemPartner" ("menuItemId")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "MenuItemPartner_partnerId_idx" ON "MenuItemPartner" ("partnerId")`);
+        logger.info('migrator: created MenuItemPartner table');
+      }
+
+      // --- ConsumptionPerson -------------------------------------------------
+      if (!(await tableExists(prisma, 'ConsumptionPerson'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "ConsumptionPerson" (
+            "id"        INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "name"      TEXT NOT NULL,
+            "type"      TEXT NOT NULL,
+            "isActive"  INTEGER NOT NULL DEFAULT 1,
+            "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "ConsumptionPerson_type_idx" ON "ConsumptionPerson" ("type")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "ConsumptionPerson_isActive_idx" ON "ConsumptionPerson" ("isActive")`);
+        logger.info('migrator: created ConsumptionPerson table');
+      }
+
+      // --- PaymentAccount (live config) --------------------------------------
+      if (!(await tableExists(prisma, 'PaymentAccount'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "PaymentAccount" (
+            "id"                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "type"              TEXT NOT NULL,
+            "displayName"       TEXT NOT NULL,
+            "accountHolderName" TEXT,
+            "phoneNumber"       TEXT,
+            "bankName"          TEXT,
+            "accountNumber"     TEXT,
+            "iban"              TEXT,
+            "isActive"          INTEGER NOT NULL DEFAULT 1,
+            "printOnReceipt"    INTEGER NOT NULL DEFAULT 0,
+            "sortOrder"         INTEGER NOT NULL DEFAULT 0,
+            "createdAt"         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt"         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "PaymentAccount_type_idx" ON "PaymentAccount" ("type")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "PaymentAccount_isActive_idx" ON "PaymentAccount" ("isActive")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "PaymentAccount_printOnReceipt_idx" ON "PaymentAccount" ("printOnReceipt")`);
+        logger.info('migrator: created PaymentAccount table');
+      }
+
+      // --- Payment (actual transactions — many per order, from day one) -----
+      if (!(await tableExists(prisma, 'Payment'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "Payment" (
+            "id"                 INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "orderId"            INTEGER NOT NULL,
+            "paymentAccountId"   INTEGER,
+            "method"             TEXT NOT NULL,
+            "amount"             REAL NOT NULL,
+            "accountDisplayName" TEXT,
+            "accountNumberSnap"  TEXT,
+            "ibanSnap"           TEXT,
+            "isLegacyPayment"    INTEGER NOT NULL DEFAULT 0,
+            "recordedBy"         TEXT,
+            "recordedAt"         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt"          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY ("orderId") REFERENCES "Order" ("id") ON DELETE CASCADE,
+            FOREIGN KEY ("paymentAccountId") REFERENCES "PaymentAccount" ("id") ON DELETE SET NULL
+          )
+        `);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "Payment_orderId_idx" ON "Payment" ("orderId")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "Payment_method_idx" ON "Payment" ("method")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "Payment_paymentAccountId_idx" ON "Payment" ("paymentAccountId")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "Payment_isLegacyPayment_idx" ON "Payment" ("isLegacyPayment")`);
+        logger.info('migrator: created Payment table');
+      }
+
+      // --- OrderItemPartnerAllocation (historical snapshot) ------------------
+      if (!(await tableExists(prisma, 'OrderItemPartnerAllocation'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "OrderItemPartnerAllocation" (
+            "id"          INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "orderItemId" INTEGER NOT NULL,
+            "orderId"     INTEGER NOT NULL,
+            "partnerId"   INTEGER,
+            "partnerName" TEXT NOT NULL,
+            "percentage"  REAL NOT NULL,
+            "amount"      REAL NOT NULL,
+            FOREIGN KEY ("orderItemId") REFERENCES "OrderItem" ("id") ON DELETE CASCADE,
+            FOREIGN KEY ("orderId") REFERENCES "Order" ("id") ON DELETE CASCADE,
+            FOREIGN KEY ("partnerId") REFERENCES "Partner" ("id") ON DELETE SET NULL
+          )
+        `);
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "OrderItemPartnerAllocation_orderItemId_idx" ON "OrderItemPartnerAllocation" ("orderItemId")`
+        );
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "OrderItemPartnerAllocation_orderId_idx" ON "OrderItemPartnerAllocation" ("orderId")`
+        );
+        await prisma.$executeRawUnsafe(
+          `CREATE INDEX "OrderItemPartnerAllocation_partnerId_idx" ON "OrderItemPartnerAllocation" ("partnerId")`
+        );
+        logger.info('migrator: created OrderItemPartnerAllocation table');
+      }
+
+      // --- SocialLink ----------------------------------------------------------
+      if (!(await tableExists(prisma, 'SocialLink'))) {
+        await prisma.$executeRawUnsafe(`
+          CREATE TABLE "SocialLink" (
+            "id"            INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "platform"      TEXT NOT NULL,
+            "displayName"   TEXT NOT NULL,
+            "value"         TEXT NOT NULL,
+            "isEnabled"     INTEGER NOT NULL DEFAULT 1,
+            "showOnReceipt" INTEGER NOT NULL DEFAULT 0,
+            "sortOrder"     INTEGER NOT NULL DEFAULT 0,
+            "createdAt"     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt"     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "SocialLink_isEnabled_idx" ON "SocialLink" ("isEnabled")`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX "SocialLink_sortOrder_idx" ON "SocialLink" ("sortOrder")`);
+        logger.info('migrator: created SocialLink table');
+      }
+
+      // --- Order: new columns ---------------------------------------------
+      // Plain ADD COLUMN, no inline FK — matches the existing cashierName
+      // precedent (migration v1). ConsumptionPerson supports soft-delete
+      // (isActive) precisely so app code never needs to hard-delete a row
+      // this column points at.
+      const orderCols: [string, string][] = [
+        ['orderType', `TEXT NOT NULL DEFAULT 'SALE'`],
+        ['consumptionPersonId', `INTEGER`],
+        ['consumptionPersonName', `TEXT`],
+        ['consumptionNotes', `TEXT`],
+        ['serviceChargeType', `TEXT NOT NULL DEFAULT 'NONE'`],
+        ['serviceChargeValue', `REAL NOT NULL DEFAULT 0`],
+        ['serviceChargeAmount', `REAL NOT NULL DEFAULT 0`],
+        ['paymentStatus', `TEXT NOT NULL DEFAULT 'PENDING'`],
+      ];
+      for (const [col, def] of orderCols) {
+        if (!(await columnExists(prisma, 'Order', col))) {
+          await prisma.$executeRawUnsafe(`ALTER TABLE "Order" ADD COLUMN "${col}" ${def}`);
+          logger.info(`migrator: added Order.${col}`);
+        }
+      }
+      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Order_orderType_idx" ON "Order" ("orderType")`);
+      await prisma.$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "Order_consumptionPersonId_idx" ON "Order" ("consumptionPersonId")`
+      );
+      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Order_paymentStatus_idx" ON "Order" ("paymentStatus")`);
+
+      // --- Settings: new columns -------------------------------------------
+      const settingsCols: [string, string][] = [
+        ['logoPath', `TEXT`],
+        ['currencyCode', `TEXT NOT NULL DEFAULT 'PKR'`],
+        ['receiptShowLogo', `INTEGER NOT NULL DEFAULT 1`],
+        ['serviceChargePresets', `TEXT`],
+        ['googleReviewUrl', `TEXT`],
+        ['googleReviewOnReceipt', `INTEGER NOT NULL DEFAULT 0`],
+      ];
+      for (const [col, def] of settingsCols) {
+        if (!(await columnExists(prisma, 'Settings', col))) {
+          await prisma.$executeRawUnsafe(`ALTER TABLE "Settings" ADD COLUMN "${col}" ${def}`);
+          logger.info(`migrator: added Settings.${col}`);
+        }
+      }
+    },
+  },
+  {
+    version: 4,
+    description: 'Backfill legacy payment records for pre-existing completed orders',
+    up: async (prisma) => {
+      // The pre-overhaul system was cash-only: every existing Order was, by
+      // definition, paid in full in cash at the time it was created. This
+      // step makes that fact explicit in the new Payment/paymentStatus model
+      // without altering any original order data (totals, items, cashier,
+      // timestamps are untouched).
+      //
+      // Idempotent: only orders that do not already have a Payment row are
+      // backfilled, so running this step twice never creates duplicates.
+      const orders = await prisma.$queryRawUnsafe<
+        { id: number; grandTotal: number; createdAt: string }[]
+      >(`SELECT "id", "grandTotal", "createdAt" FROM "Order"`);
+
+      let backfilled = 0;
+      for (const order of orders) {
+        const existingPayment = await prisma.$queryRawUnsafe<{ id: number }[]>(
+          `SELECT "id" FROM "Payment" WHERE "orderId" = ? LIMIT 1`,
+          order.id
+        );
+        if (existingPayment.length > 0) continue;
+
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "Payment"
+             ("orderId", "method", "amount", "accountDisplayName",
+              "isLegacyPayment", "recordedBy", "recordedAt", "updatedAt")
+           VALUES (?, 'CASH', ?, 'Cash (legacy — pre-overhaul record)',
+                   1, NULL, ?, ?)`,
+          order.id,
+          order.grandTotal,
+          order.createdAt,
+          order.createdAt
+        );
+
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Order" SET "paymentStatus" = 'PAID' WHERE "id" = ?`,
+          order.id
+        );
+        backfilled++;
+      }
+
+      logger.info(`migrator: v4 backfilled ${backfilled} legacy payment record(s)`, {
+        totalOrders: orders.length,
+      });
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -349,6 +611,41 @@ async function readUserVersion(prisma: PrismaClient): Promise<number> {
 
 async function setUserVersion(prisma: PrismaClient, version: number): Promise<void> {
   await prisma.$executeRawUnsafe(`PRAGMA user_version = ${version}`);
+}
+
+// ---------------------------------------------------------------------------
+// Pre-migration backup — best-effort, never blocks the migration.
+//
+// Runs once, immediately before any pending migration step touches an
+// existing (non-empty) database, so a snapshot of the pre-overhaul data
+// always exists even though normal operation never requires restoring it.
+// Reuses the existing local backup engine (VACUUM INTO) — no new backup
+// mechanism is introduced. A BackupRecord audit row is written only if that
+// table already exists (it does for any database that has ever run
+// migration v1); its absence never prevents the physical backup file from
+// being created.
+// ---------------------------------------------------------------------------
+async function runPreMigrationBackup(prisma: PrismaClient): Promise<void> {
+  try {
+    logger.info('migrator: creating pre-migration backup');
+    const result = await createLocalBackup(prisma);
+
+    if (await tableExists(prisma, 'BackupRecord')) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "BackupRecord" ("filename", "filePath", "fileSizeBytes", "trigger", "cloudStatus")
+         VALUES (?, ?, ?, 'pre-migration', 'none')`,
+        result.filename,
+        result.filePath,
+        result.fileSizeBytes
+      );
+    }
+
+    logger.info('migrator: pre-migration backup complete', { filename: result.filename });
+  } catch (err) {
+    // Never block startup/migration on a backup failure — log and continue.
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error('migrator: pre-migration backup failed — continuing without it', { error: msg });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +673,10 @@ export async function runMigrations(prisma: PrismaClient): Promise<void> {
   }
 
   const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
+
+  if (pending.length > 0) {
+    await runPreMigrationBackup(prisma);
+  }
 
   for (const migration of pending) {
     logger.info(

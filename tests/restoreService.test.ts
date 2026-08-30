@@ -6,7 +6,7 @@
  * SQLite files for header and integrity checks. No native compilation.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

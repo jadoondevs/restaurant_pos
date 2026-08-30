@@ -9,7 +9,7 @@
  * production logic, not a simplified version.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
 
 // ---------------------------------------------------------------------------
 // Helpers that mirror the production logic in electron/ipc/orders.ts

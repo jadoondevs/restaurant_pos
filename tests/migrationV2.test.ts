@@ -6,7 +6,7 @@
  * No native compilation required.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
 
 // ---------------------------------------------------------------------------
 // Replicate migration v2 logic

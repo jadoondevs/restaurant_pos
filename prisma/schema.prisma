@@ -28,7 +28,9 @@ model Admin {
 
 // ---------------------------------------------------------------------------
 // User — the single source of truth for authentication (Phase 2+).
-// role values: 'ADMIN' | 'CASHIER'
+// role values: 'ADMIN' | 'MANAGER' | 'CASHIER'
+// (Stored as a plain String — SQLite has no native enum support in Prisma;
+// the valid set is validated in application code, see electron/ipc/users.ts.)
 // ---------------------------------------------------------------------------
 model User {
   id                 Int      @id @default(autoincrement())
@@ -60,23 +62,63 @@ model Category {
 
 // A single sellable menu item.
 model MenuItem {
-  id          Int         @id @default(autoincrement())
-  name        String
-  description String?
-  price       Float
-  available   Boolean     @default(true)
-  image       String?     // stored as a data URL / relative path (optional)
-  categoryId  Int
-  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  orderItems  OrderItem[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id                Int               @id @default(autoincrement())
+  name              String
+  description       String?
+  price             Float
+  available         Boolean           @default(true)
+  image             String? // stored as a data URL / relative path (optional)
+  categoryId        Int
+  category          Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems        OrderItem[]
+  partnerOwnerships MenuItemPartner[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   // Prevent duplicate item names inside the same category.
   @@unique([name, categoryId])
   @@index([categoryId])
   @@index([name])
   @@index([available])
+}
+
+// ---------------------------------------------------------------------------
+// Partner — a business partner with fractional ownership of one or more
+// menu items. Ownership is configured per item via MenuItemPartner (the
+// LIVE/current configuration) and is snapshotted per sale via
+// OrderItemPartnerAllocation (the HISTORICAL, immutable record).
+// Reports must always read the historical snapshot, never the live config,
+// so that changing a partner's percentage never rewrites past sales.
+// ---------------------------------------------------------------------------
+model Partner {
+  id          Int                          @id @default(autoincrement())
+  name        String                       @unique
+  isActive    Boolean                      @default(true)
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  ownerships  MenuItemPartner[]
+  allocations OrderItemPartnerAllocation[]
+
+  @@index([isActive])
+}
+
+// Live/current ownership configuration for a menu item. Editable by admins.
+// The percentages for a given menuItemId are expected to sum to 100 —
+// enforced in application code at write time (SQLite cannot express a
+// cross-row CHECK constraint here).
+model MenuItemPartner {
+  id         Int      @id @default(autoincrement())
+  menuItemId Int
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  partnerId  Int
+  partner    Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  percentage Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([menuItemId, partnerId])
+  @@index([menuItemId])
+  @@index([partnerId])
 }
 
 // Optional customer record that can be attached to an order.
@@ -93,7 +135,29 @@ model Customer {
   @@index([phone])
 }
 
-// A completed sale.
+// A known owner or employee whose consumption can be tracked against orders.
+// Kept as a lightweight, admin-managed lookup list (not a User) — owners in
+// particular are not necessarily system users. Order.consumptionPersonName
+// snapshots the name at order time, so deleting/renaming an entry here never
+// changes historical orders.
+model ConsumptionPerson {
+  id        Int      @id @default(autoincrement())
+  name      String
+  type      String // 'OWNER' | 'EMPLOYEE'
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+
+  @@index([type])
+  @@index([isActive])
+}
+
+// A completed sale, an owner-consumption record, or an employee-consumption
+// record — all three share the same item/total/cashier machinery and are
+// distinguished by orderType. Owner/employee orders are real transactions
+// (full item-level detail preserved) so they count toward overall sales
+// totals while remaining separately reportable.
 model Order {
   id            Int         @id @default(autoincrement())
   receiptNumber String      @unique
@@ -105,34 +169,153 @@ model Order {
   cashReceived  Float       @default(0)
   change        Float       @default(0)
   tableNumber   String?
-  cashierName   String?     // fullName of the logged-in user at time of sale
+  cashierName   String? // fullName of the logged-in user at time of sale
   status        String      @default("completed") // completed | active
   customerId    Int?
   customer      Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items         OrderItem[]
   createdAt     DateTime    @default(now())
 
+  // --- Order classification (owner/employee consumption) ---
+  orderType             String             @default("SALE") // 'SALE' | 'OWNER_CONSUMPTION' | 'EMPLOYEE_CONSUMPTION'
+  consumptionPersonId   Int?
+  consumptionPerson     ConsumptionPerson? @relation(fields: [consumptionPersonId], references: [id], onDelete: SetNull)
+  consumptionPersonName String? // snapshot — survives ConsumptionPerson edits/deletion
+  consumptionNotes      String?
+
+  // --- Service charge ---
+  // Paid directly to waiters — excluded from all sales/revenue/profit totals.
+  // serviceChargeAmount is the final computed PKR figure and is PERMANENT:
+  // it is never recalculated later even if presets or settings change.
+  serviceChargeType   String @default("NONE") // 'NONE' | 'FIXED' | 'PERCENTAGE'
+  serviceChargeValue  Float  @default(0) // cashier's input: PKR if FIXED, percent (0-100) if PERCENTAGE
+  serviceChargeAmount Float  @default(0) // computed PKR amount, stored permanently
+
+  // --- Payment status (derived from the sum of related Payment rows) ---
+  paymentStatus String    @default("PENDING") // 'PENDING' | 'PARTIAL' | 'PAID'
+  payments      Payment[]
+
+  // Denormalized back-reference used by OrderItemPartnerAllocation for
+  // single-hop partner/date-range report queries — see that model.
+  partnerAllocations OrderItemPartnerAllocation[]
+
   @@index([createdAt])
   @@index([receiptNumber])
   @@index([status])
   @@index([customerId])
+  @@index([orderType])
+  @@index([consumptionPersonId])
+  @@index([paymentStatus])
 }
 
 // Line item snapshot on an order (name/price copied so history is stable).
 model OrderItem {
-  id                  Int       @id @default(autoincrement())
+  id                  Int                          @id @default(autoincrement())
   orderId             Int
-  order               Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order               Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   menuItemId          Int?
-  menuItem            MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  menuItem            MenuItem?                    @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
   name                String
   price               Float
   quantity            Int
   specialInstructions String?
   lineTotal           Float
+  partnerAllocations  OrderItemPartnerAllocation[]
 
   @@index([orderId])
   @@index([menuItemId])
+}
+
+// Historical partner-allocation snapshot — written once when an OrderItem is
+// created (from the MenuItemPartner rows in effect at that moment) and never
+// modified afterward. Partner reports read exclusively from this table, never
+// from the live MenuItemPartner config, so a later ownership change never
+// alters a past sale's allocation.
+model OrderItemPartnerAllocation {
+  id          Int       @id @default(autoincrement())
+  orderItemId Int
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  // Denormalized order reference — lets partner/date-range reports filter
+  // without a two-hop join through OrderItem for every row.
+  orderId     Int
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  partnerId   Int?
+  partner     Partner?  @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  partnerName String // snapshot — survives Partner renames/deletion
+  percentage  Float // snapshot of ownership % at sale time
+  amount      Float // snapshot: lineTotal * percentage/100
+
+  @@index([orderItemId])
+  @@index([orderId])
+  @@index([partnerId])
+}
+
+// ---------------------------------------------------------------------------
+// PaymentAccount — admin-configured payment methods/accounts the restaurant
+// currently accepts. Two independent toggles:
+//   isActive       — selectable as the actual payment method for an order
+//   printOnReceipt — printed as a payment OPTION/instruction on receipts
+// These are deliberately independent (see Payment below for why).
+// ---------------------------------------------------------------------------
+model PaymentAccount {
+  id                Int       @id @default(autoincrement())
+  type              String // 'CASH' | 'EASYPAISA' | 'BANK' | ... (extensible; validated in app code, not a DB enum)
+  displayName       String
+  accountHolderName String?
+  phoneNumber       String? // Easypaisa / mobile wallet accounts
+  bankName          String? // bank accounts
+  accountNumber     String? // bank accounts
+  iban              String? // bank accounts
+  isActive          Boolean   @default(true)
+  printOnReceipt    Boolean   @default(false)
+  sortOrder         Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  payments          Payment[]
+
+  @@index([type])
+  @@index([isActive])
+  @@index([printOnReceipt])
+}
+
+// ---------------------------------------------------------------------------
+// Payment — the actual, historical record of money received against an
+// order. Deliberately separate from PaymentAccount (the live config) and
+// from the receipt's printed payment OPTIONS (which are read live from
+// PaymentAccount at print time, not stored here).
+//
+// orderId is intentionally NOT unique: an order may have zero, one, or many
+// Payment rows. Split payments are not exposed in the UI yet, but the schema
+// already supports them so no future redesign is needed.
+//
+// Account details are snapshotted at the moment the payment is recorded
+// (accountDisplayName/accountNumberSnap/ibanSnap) and never re-read from
+// PaymentAccount afterward — if the Easypaisa number changes next month,
+// this row still shows the number that was actually used.
+// ---------------------------------------------------------------------------
+model Payment {
+  id                 Int             @id @default(autoincrement())
+  orderId            Int
+  order              Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentAccountId   Int?
+  paymentAccount     PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  method             String // snapshot: 'CASH' | 'EASYPAISA' | 'BANK' | ...
+  amount             Float // net amount applied toward the bill (never includes cash change given back)
+  accountDisplayName String?
+  accountNumberSnap  String?
+  ibanSnap           String?
+  // True only for rows created by the one-time v4 backfill migration for
+  // orders that existed before this payment system did — distinguishes a
+  // real, manually-recorded payment from a synthesized historical record.
+  isLegacyPayment    Boolean         @default(false)
+  recordedBy         String? // fullName snapshot of the user who recorded/edited it
+  recordedAt         DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([method])
+  @@index([paymentAccountId])
+  @@index([isLegacyPayment])
 }
 
 // Key/value application settings (single row, id = 1).
@@ -150,6 +333,14 @@ model Settings {
   backupOnExit       Boolean  @default(true)
   cloudBackupEnabled Boolean  @default(false)
   updatedAt          DateTime @updatedAt
+
+  // --- Branding & receipt (Batch 8/9 will surface these in the UI) ---
+  logoPath              String? // local file path/relative reference — kept offline-capable
+  currencyCode          String  @default("PKR")
+  receiptShowLogo       Boolean @default(true)
+  serviceChargePresets  String? // JSON array of quick-pick amounts, e.g. "[50,100,150]"
+  googleReviewUrl       String?
+  googleReviewOnReceipt Boolean @default(false)
 }
 
 // Monotonic per-day receipt counter — never resets, never reuses numbers.
@@ -173,4 +364,25 @@ model BackupRecord {
 
   @@index([createdAt])
   @@index([cloudStatus])
+}
+
+// ---------------------------------------------------------------------------
+// SocialLink — admin-managed list of social/contact platforms, replacing a
+// fixed set of hard-coded Settings columns so a new platform never requires
+// a schema migration. platform='OTHER' plus a free-typed displayName covers
+// anything not in the common set below.
+// ---------------------------------------------------------------------------
+model SocialLink {
+  id            Int      @id @default(autoincrement())
+  platform      String // 'FACEBOOK' | 'INSTAGRAM' | 'TIKTOK' | 'WHATSAPP' | 'WEBSITE' | 'OTHER'
+  displayName   String
+  value         String // URL, phone number, or handle — meaning depends on platform
+  isEnabled     Boolean  @default(true)
+  showOnReceipt Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@index([sortOrder])
 }
