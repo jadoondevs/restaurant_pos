@@ -76,4 +76,88 @@ export function registerReportHandlers() {
       revenue: +(g._sum.lineTotal ?? 0).toFixed(2),
     }));
   }, { requiredRole: 'MANAGER' });
+
+  // Owner/employee consumption report — "what did Employee X consume during
+  // this date range?" Reads real Order/OrderItem rows (orderType !=
+  // 'SALE'); nothing here is a separate ledger, so it stays consistent with
+  // whatever was actually recorded at checkout (Batch 3).
+  handle(
+    'reports:consumption',
+    async (
+      _event,
+      { from, to, type, personId }: RangeParams & { type?: 'OWNER' | 'EMPLOYEE'; personId?: number }
+    ) => {
+      const range = resolveDateRange({ from, to });
+
+      const orderTypeFilter =
+        type === 'OWNER' ? 'OWNER_CONSUMPTION' : type === 'EMPLOYEE' ? 'EMPLOYEE_CONSUMPTION' : undefined;
+
+      const orders = await prisma.order.findMany({
+        where: {
+          createdAt: { gte: range.gte, lte: range.lte },
+          orderType: orderTypeFilter ?? { in: ['OWNER_CONSUMPTION', 'EMPLOYEE_CONSUMPTION'] },
+          ...(personId ? { consumptionPersonId: personId } : {}),
+        },
+        include: { items: true },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      interface PersonSummary {
+        consumptionPersonId: number | null;
+        personName: string;
+        orderType: string;
+        orderCount: number;
+        quantity: number;
+        value: number;
+      }
+      const byPerson = new Map<string, PersonSummary>();
+
+      let ownerTotal = 0;
+      let employeeTotal = 0;
+
+      for (const order of orders) {
+        const orderValue = order.items.reduce((sum, i) => sum + i.lineTotal, 0);
+        const key = `${order.consumptionPersonId ?? 'null'}:${order.orderType}`;
+        const entry = byPerson.get(key) ?? {
+          consumptionPersonId: order.consumptionPersonId,
+          personName: order.consumptionPersonName ?? 'Unknown',
+          orderType: order.orderType,
+          orderCount: 0,
+          quantity: 0,
+          value: 0,
+        };
+        entry.orderCount += 1;
+        entry.quantity += order.items.reduce((sum, i) => sum + i.quantity, 0);
+        entry.value += orderValue;
+        byPerson.set(key, entry);
+
+        if (order.orderType === 'OWNER_CONSUMPTION') ownerTotal += orderValue;
+        else if (order.orderType === 'EMPLOYEE_CONSUMPTION') employeeTotal += orderValue;
+      }
+
+      return {
+        orders: orders.map((o) => ({
+          id: o.id,
+          receiptNumber: o.receiptNumber,
+          createdAt: o.createdAt,
+          orderType: o.orderType,
+          consumptionPersonName: o.consumptionPersonName,
+          consumptionNotes: o.consumptionNotes,
+          cashierName: o.cashierName,
+          items: o.items.map((i) => ({ name: i.name, quantity: i.quantity, lineTotal: i.lineTotal })),
+          value: +o.items.reduce((sum, i) => sum + i.lineTotal, 0).toFixed(2),
+        })),
+        byPerson: [...byPerson.values()]
+          .map((p) => ({ ...p, value: +p.value.toFixed(2) }))
+          .sort((a, b) => b.value - a.value),
+        totals: {
+          ownerTotal: +ownerTotal.toFixed(2),
+          employeeTotal: +employeeTotal.toFixed(2),
+          combinedTotal: +(ownerTotal + employeeTotal).toFixed(2),
+          orderCount: orders.length,
+        },
+      };
+    },
+    { requiredRole: 'MANAGER' }
+  );
 }

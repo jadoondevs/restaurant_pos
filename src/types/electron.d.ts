@@ -113,6 +113,7 @@ export interface ElectronApi {
   dashboardStats(): Promise<IpcResult<any>>;
   reportSummary(params: unknown): Promise<IpcResult<any>>;
   reportTopItems(params: unknown): Promise<IpcResult<any[]>>;
+  reportConsumption(params: unknown): Promise<IpcResult<any>>;
 
   // Settings
   settingsGet(): Promise<IpcResult<any>>;

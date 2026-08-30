@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Download, DollarSign, ShoppingBag, TrendingUp } from 'lucide-react';
+import { Download, DollarSign, ShoppingBag, TrendingUp, Users } from 'lucide-react';
 import { api } from '@/services/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -8,7 +8,7 @@ import { downloadCsv } from '@/utils/csv';
 import { Card, StatCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { PageHeader, EmptyState, Spinner } from '@/components/ui/Misc';
-import type { ReportSummary, TopItem } from '@/types';
+import type { ReportSummary, TopItem, ConsumptionReport } from '@/types';
 
 type Period = 'today' | 'week' | 'month';
 const periodLabels: Record<Period, string> = {
@@ -25,6 +25,7 @@ export function Reports() {
   const [period, setPeriod] = useState<Period>('today');
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [topItems, setTopItems] = useState<TopItem[]>([]);
+  const [consumption, setConsumption] = useState<ConsumptionReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
@@ -32,9 +33,14 @@ export function Reports() {
       setLoading(true);
       try {
         const range = rangeFor(p);
-        const [sum, tops] = await Promise.all([api.reportSummary(range), api.topItems(range)]);
+        const [sum, tops, cons] = await Promise.all([
+          api.reportSummary(range),
+          api.topItems(range),
+          api.consumptionReport(range),
+        ]);
         setSummary(sum);
         setTopItems(tops);
+        setConsumption(cons);
       } catch (e) {
         toast(e instanceof Error ? e.message : 'Failed to load reports.', 'error');
       } finally {
@@ -65,6 +71,20 @@ export function Reports() {
     downloadCsv(
       `top-items-${period}-${new Date().toISOString().slice(0, 10)}.csv`,
       topItems.map((t) => ({ Item: t.name, Quantity: t.quantity, Revenue: t.revenue.toFixed(2) }))
+    );
+  };
+
+  const exportConsumption = () => {
+    if (!consumption?.byPerson.length) return toast('Nothing to export.', 'info');
+    downloadCsv(
+      `owner-employee-consumption-${period}-${new Date().toISOString().slice(0, 10)}.csv`,
+      consumption.byPerson.map((p) => ({
+        Person: p.personName,
+        Type: p.orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee',
+        Orders: p.orderCount,
+        Quantity: p.quantity,
+        Value: p.value.toFixed(2),
+      }))
     );
   };
 
@@ -197,6 +217,67 @@ export function Reports() {
               )}
             </Card>
           </div>
+
+          {/* Owner/Employee consumption */}
+          <Card className="mt-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                <Users size={18} /> Owner / Employee Consumption
+              </h2>
+              <Button size="sm" variant="ghost" onClick={exportConsumption}>
+                <Download size={16} /> CSV
+              </Button>
+            </div>
+
+            {!consumption || consumption.byPerson.length === 0 ? (
+              <EmptyState title="No owner or employee consumption in this period" />
+            ) : (
+              <>
+                <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <StatCard
+                    label="Owner Consumption"
+                    value={formatCurrency(consumption.totals.ownerTotal, sym)}
+                    icon={<Users size={22} />}
+                    accent="text-purple-600"
+                  />
+                  <StatCard
+                    label="Employee Consumption"
+                    value={formatCurrency(consumption.totals.employeeTotal, sym)}
+                    icon={<Users size={22} />}
+                    accent="text-amber-600"
+                  />
+                  <StatCard
+                    label="Combined Total"
+                    value={formatCurrency(consumption.totals.combinedTotal, sym)}
+                    icon={<Users size={22} />}
+                    accent="text-brand-600"
+                  />
+                </div>
+                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {consumption.byPerson.map((p) => (
+                    <li
+                      key={`${p.consumptionPersonId}-${p.orderType}`}
+                      className="flex items-center justify-between py-2.5"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {p.personName}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {p.orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee'} ·{' '}
+                          {p.orderCount} order{p.orderCount === 1 ? '' : 's'} · {p.quantity} item
+                          {p.quantity === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        {formatCurrency(p.value, sym)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Card>
         </>
       )}
     </div>

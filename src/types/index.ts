@@ -215,6 +215,38 @@ export interface TopItem {
   revenue: number;
 }
 
+export interface ConsumptionOrderSummary {
+  id: number;
+  receiptNumber: string;
+  createdAt: string;
+  orderType: OrderType;
+  consumptionPersonName: string | null;
+  consumptionNotes: string | null;
+  cashierName: string | null;
+  items: { name: string; quantity: number; lineTotal: number }[];
+  value: number;
+}
+
+export interface ConsumptionPersonSummary {
+  consumptionPersonId: number | null;
+  personName: string;
+  orderType: OrderType;
+  orderCount: number;
+  quantity: number;
+  value: number;
+}
+
+export interface ConsumptionReport {
+  orders: ConsumptionOrderSummary[];
+  byPerson: ConsumptionPersonSummary[];
+  totals: {
+    ownerTotal: number;
+    employeeTotal: number;
+    combinedTotal: number;
+    orderCount: number;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Cart
 // ---------------------------------------------------------------------------

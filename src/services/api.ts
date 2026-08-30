@@ -13,6 +13,7 @@ import type {
   DashboardStats,
   ReportSummary,
   TopItem,
+  ConsumptionReport,
   PrintResult,
   BackupStatus,
   BackupRecord,
@@ -121,6 +122,12 @@ export const api = {
     unwrap<ReportSummary>(window.api.reportSummary(params)),
   topItems: (params: { from: string; to: string }) =>
     unwrap<TopItem[]>(window.api.reportTopItems(params)),
+  consumptionReport: (params: {
+    from: string;
+    to: string;
+    type?: 'OWNER' | 'EMPLOYEE';
+    personId?: number;
+  }) => unwrap<ConsumptionReport>(window.api.reportConsumption(params)),
 
   // Settings
   getSettings: () => unwrap<Settings>(window.api.settingsGet()),

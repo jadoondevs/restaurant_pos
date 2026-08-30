@@ -81,6 +81,7 @@ const api = {
   dashboardStats: () => ipcRenderer.invoke('reports:dashboard'),
   reportSummary: (params: unknown) => ipcRenderer.invoke('reports:summary', params),
   reportTopItems: (params: unknown) => ipcRenderer.invoke('reports:topItems', params),
+  reportConsumption: (params: unknown) => ipcRenderer.invoke('reports:consumption', params),
 
   // Settings
   settingsGet: () => ipcRenderer.invoke('settings:get'),
