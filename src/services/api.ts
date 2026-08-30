@@ -3,6 +3,8 @@ import type {
   UserRecord,
   Category,
   MenuItem,
+  Partner,
+  MenuItemPartner,
   Order,
   Payment,
   ConsumptionPerson,
@@ -65,6 +67,19 @@ export const api = {
   updateMenuItem: (id: number, data: Partial<MenuItem>) =>
     unwrap<MenuItem>(window.api.menuUpdate(id, data)),
   deleteMenuItem: (id: number) => unwrap(window.api.menuDelete(id)),
+
+  // Partners
+  listPartners: (activeOnly?: boolean) => unwrap<Partner[]>(window.api.partnersList(activeOnly)),
+  createPartner: (data: { name: string }) => unwrap<Partner>(window.api.partnerCreate(data)),
+  updatePartner: (data: { id: number; name: string }) => unwrap<Partner>(window.api.partnerUpdate(data)),
+  setPartnerActive: (id: number, isActive: boolean) =>
+    unwrap<Partner>(window.api.partnerSetActive({ id, isActive })),
+
+  // Partner ownership
+  listPartnerOwnership: (menuItemId: number) =>
+    unwrap<MenuItemPartner[]>(window.api.partnerOwnershipList(menuItemId)),
+  setPartnerOwnership: (menuItemId: number, ownerships: { partnerId: number; percentage: number }[]) =>
+    unwrap<MenuItemPartner[]>(window.api.partnerOwnershipSet({ menuItemId, ownerships })),
 
   // Orders
   createOrder: (data: unknown) => unwrap<Order>(window.api.orderCreate(data)),

@@ -416,7 +416,14 @@ export function POS() {
                       >
                         <Minus size={14} />
                       </button>
-                      <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={item.quantity}
+                        onChange={(e) => cart.setQuantity(item.menuItemId, parseInt(e.target.value, 10) || 1)}
+                        className="w-12 rounded-md border border-slate-300 bg-white text-center text-sm font-semibold dark:border-slate-600 dark:bg-slate-800"
+                      />
                       <button
                         onClick={() => cart.increment(item.menuItemId)}
                         className="rounded-md bg-slate-100 p-1 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200"

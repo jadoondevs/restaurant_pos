@@ -62,6 +62,27 @@ export interface MenuItem {
 }
 
 // ---------------------------------------------------------------------------
+// Partners & ownership
+// ---------------------------------------------------------------------------
+
+export interface Partner {
+  id: number;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Live ownership row for one menu item — see OrderItemPartnerAllocation for the historical snapshot. */
+export interface MenuItemPartner {
+  id: number;
+  menuItemId: number;
+  partnerId: number;
+  percentage: number;
+  partner?: Partner;
+}
+
+// ---------------------------------------------------------------------------
 // Customers & Orders
 // ---------------------------------------------------------------------------
 

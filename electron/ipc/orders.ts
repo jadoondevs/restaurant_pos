@@ -139,6 +139,24 @@ export function registerOrderHandlers() {
     const initialPaymentStatus =
       paymentAmount > 0 ? computePaymentStatus(totalDue, [{ amount: paymentAmount }]) : 'PENDING';
 
+    // Partner allocation — snapshot the CURRENT ownership config for each
+    // sold item now, before the transaction. This snapshot (written into
+    // OrderItemPartnerAllocation below) is what partner reports read from
+    // forever after; a later change to MenuItemPartner must never alter it.
+    const menuItemIds = [...new Set(input.items.map((i) => i.menuItemId).filter((id): id is number => !!id))];
+    const ownershipRows = menuItemIds.length
+      ? await prisma.menuItemPartner.findMany({
+          where: { menuItemId: { in: menuItemIds } },
+          include: { partner: true },
+        })
+      : [];
+    const ownershipByMenuItemId = new Map<number, { partnerId: number; partnerName: string; percentage: number }[]>();
+    for (const row of ownershipRows) {
+      const list = ownershipByMenuItemId.get(row.menuItemId) ?? [];
+      list.push({ partnerId: row.partnerId, partnerName: row.partner.name, percentage: row.percentage });
+      ownershipByMenuItemId.set(row.menuItemId, list);
+    }
+
     return prisma.$transaction(async (tx) => {
       const now = new Date();
       const y = now.getFullYear();
@@ -159,7 +177,7 @@ export function registerOrderHandlers() {
       const seq = String(rows[0].lastSeq).padStart(4, '0');
       const receiptNumber = `R-${y}${mo}${dy}-${seq}`;
 
-      return tx.order.create({
+      const order = await tx.order.create({
         data: {
           receiptNumber,
           subtotal: +subtotal.toFixed(2),
@@ -208,6 +226,28 @@ export function registerOrderHandlers() {
         },
         include: { items: true, customer: true, payments: true },
       });
+
+      // Write the historical partner-allocation snapshot for each item that
+      // had ownership configured, using the ownership fetched above — never
+      // re-read live MenuItemPartner rows after this point for this order.
+      for (const item of order.items) {
+        const ownerships = item.menuItemId ? ownershipByMenuItemId.get(item.menuItemId) : undefined;
+        if (!ownerships || ownerships.length === 0) continue;
+        const rows = ownerships;
+
+        await tx.orderItemPartnerAllocation.createMany({
+          data: rows.map((o) => ({
+            orderItemId: item.id,
+            orderId: order.id,
+            partnerId: o.partnerId,
+            partnerName: o.partnerName,
+            percentage: o.percentage,
+            amount: +((item.lineTotal * o.percentage) / 100).toFixed(2),
+          })),
+        });
+      }
+
+      return order;
     });
   });
 

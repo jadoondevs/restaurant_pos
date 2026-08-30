@@ -41,6 +41,18 @@ const api = {
   menuUpdate: (id: number, data: unknown) => ipcRenderer.invoke('menu:update', { id, data }),
   menuDelete: (id: number) => ipcRenderer.invoke('menu:delete', id),
 
+  // Partners
+  partnersList: (activeOnly?: boolean) => ipcRenderer.invoke('partners:list', activeOnly),
+  partnerCreate: (data: unknown) => ipcRenderer.invoke('partners:create', data),
+  partnerUpdate: (data: unknown) => ipcRenderer.invoke('partners:update', data),
+  partnerSetActive: (data: { id: number; isActive: boolean }) =>
+    ipcRenderer.invoke('partners:setActive', data),
+
+  // Partner ownership (per menu item)
+  partnerOwnershipList: (menuItemId: number) =>
+    ipcRenderer.invoke('partnerOwnership:list', menuItemId),
+  partnerOwnershipSet: (data: unknown) => ipcRenderer.invoke('partnerOwnership:set', data),
+
   // Orders
   orderCreate: (data: unknown) => ipcRenderer.invoke('orders:create', data),
   ordersList: (params?: unknown) => ipcRenderer.invoke('orders:list', params),

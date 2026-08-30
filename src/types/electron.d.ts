@@ -1,7 +1,15 @@
 // Ambient declaration for the API exposed by the preload bridge.
 // Every method returns the IpcResult envelope from the main process.
 
-import type { AuthUser, PrintResult, UserRecord, Payment, ConsumptionPerson } from './index';
+import type {
+  AuthUser,
+  PrintResult,
+  UserRecord,
+  Payment,
+  ConsumptionPerson,
+  Partner,
+  MenuItemPartner,
+} from './index';
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -53,6 +61,19 @@ export interface ElectronApi {
   menuCreate(data: unknown): Promise<IpcResult<any>>;
   menuUpdate(id: number, data: unknown): Promise<IpcResult<any>>;
   menuDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
+
+  // Partners
+  partnersList(activeOnly?: boolean): Promise<IpcResult<Partner[]>>;
+  partnerCreate(data: { name: string }): Promise<IpcResult<Partner>>;
+  partnerUpdate(data: { id: number; name: string }): Promise<IpcResult<Partner>>;
+  partnerSetActive(data: { id: number; isActive: boolean }): Promise<IpcResult<Partner>>;
+
+  // Partner ownership
+  partnerOwnershipList(menuItemId: number): Promise<IpcResult<MenuItemPartner[]>>;
+  partnerOwnershipSet(data: {
+    menuItemId: number;
+    ownerships: { partnerId: number; percentage: number }[];
+  }): Promise<IpcResult<MenuItemPartner[]>>;
 
   // Orders
   orderCreate(data: unknown): Promise<IpcResult<any>>;
