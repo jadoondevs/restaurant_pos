@@ -12,6 +12,28 @@ import { logger } from './logger';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ---------------------------------------------------------------------------
+// Batch 11 hardening — top-level safety nets.
+//
+// Without these, a bug in any rarely-hit code path (a stray unhandled
+// promise, an unexpected exception outside the try/catch'd IPC handlers)
+// could either crash the whole app with no record of why, or leave it in a
+// half-broken state a cashier can't diagnose mid-service. Every IPC handler
+// already goes through handle()'s own try/catch and returns a structured
+// error to the renderer, so these are strictly a last-resort log-and-
+// continue net — never routine, never expected to fire in normal use.
+// ---------------------------------------------------------------------------
+process.on('uncaughtException', (err) => {
+  logger.error('main: uncaught exception', { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('main: unhandled promise rejection', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+
 // Vite injects these env vars during dev/build.
 process.env.APP_ROOT = path.join(__dirname, '..');
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -98,7 +120,10 @@ app.whenReady().then(async () => {
   try {
     await ensureBootstrap();
   } catch (err) {
-    logger.error('main: bootstrap failed', { error: err });
+    // JSON.stringify(Error) drops the message/stack (non-enumerable), so
+    // this must be normalized the same way every other catch in the app
+    // does — otherwise the log line records only "{}".
+    logger.error('main: bootstrap failed', { error: err instanceof Error ? err.message : String(err) });
   }
 
   // 3. Start the backup scheduler.
@@ -142,7 +167,7 @@ app.on('before-quit', async (event) => {
   try {
     await backupService.runExitBackup();
   } catch (err) {
-    logger.error('main: exit backup failed', { error: err });
+    logger.error('main: exit backup failed', { error: err instanceof Error ? err.message : String(err) });
   }
 
   // Tear down services in order.
@@ -165,7 +190,7 @@ app.on('before-quit', async (event) => {
     await prisma.$disconnect();
     logger.info('main: Prisma disconnected');
   } catch (err) {
-    logger.error('main: Prisma disconnect failed', { error: err });
+    logger.error('main: Prisma disconnect failed', { error: err instanceof Error ? err.message : String(err) });
   }
 
   logger.info('main: graceful shutdown complete — calling app.quit()');

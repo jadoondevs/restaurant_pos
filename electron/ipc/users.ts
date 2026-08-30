@@ -7,7 +7,7 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../database/client';
 import { handle } from './util';
-import { getSession } from '../auth/sessionStore';
+import { getSession, clearSessionsForUser } from '../auth/sessionStore';
 
 const VALID_ROLES = ['ADMIN', 'MANAGER', 'CASHIER'] as const;
 type Role = typeof VALID_ROLES[number];
@@ -121,7 +121,7 @@ export function registerUserHandlers() {
       throw new Error(`Username "${username}" is already taken.`);
     }
 
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: data.id },
       data: { username, fullName, role },
       select: {
@@ -135,6 +135,15 @@ export function registerUserHandlers() {
         updatedAt: true,
       },
     });
+
+    // Batch 11 hardening: a role change must take effect immediately, not
+    // whenever this user's session next happens to be revalidated (session
+    // store checks are keyed off the role snapshot captured at login/reload
+    // time — see sessionStore.ts). Only invalidate on an actual change, so
+    // a routine name/username edit doesn't force a mid-shift re-login.
+    if (user.role !== role) clearSessionsForUser(data.id);
+
+    return updated;
   }, { requiredRole: 'ADMIN' });
 
   // ---------------------------------------------------------------------------
@@ -172,7 +181,7 @@ export function registerUserHandlers() {
       }
     }
 
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: data.id },
       data: { isActive: data.isActive },
       select: {
@@ -186,6 +195,12 @@ export function registerUserHandlers() {
         updatedAt: true,
       },
     });
+
+    // Batch 11 hardening: deactivation must end that user's session now,
+    // not whenever it next happens to be revalidated.
+    if (!data.isActive) clearSessionsForUser(data.id);
+
+    return updated;
   }, { requiredRole: 'ADMIN' });
 
   // ---------------------------------------------------------------------------
@@ -213,6 +228,10 @@ export function registerUserHandlers() {
       where: { id: data.id },
       data: { passwordHash, mustChangePassword: true },
     });
+
+    // Batch 11 hardening: force the affected user to re-authenticate with
+    // the new password rather than keep operating under their old session.
+    clearSessionsForUser(data.id);
 
     return { success: true };
   }, { requiredRole: 'ADMIN' });

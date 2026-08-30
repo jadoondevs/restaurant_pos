@@ -25,12 +25,6 @@
  */
 import type { AuthUser } from '../types/authUser';
 
-// TODO (Phase 2.1):
-// Authorization currently relies on the authenticated session snapshot.
-// When user management (create/edit/deactivate users) is implemented,
-// introduce immediate session invalidation for affected users by calling
-// clearSession() inside the deactivate-user and change-role IPC handlers.
-
 /** Role order from lowest to highest privilege. */
 export const ROLE_HIERARCHY: AuthUser['role'][] = ['CASHIER', 'MANAGER', 'ADMIN'];
 
@@ -49,6 +43,26 @@ export function getSession(webContentsId: number): AuthUser | undefined {
 /** Removes the session for a given webContents.id (called on logout). */
 export function clearSession(webContentsId: number): void {
   store.delete(webContentsId);
+}
+
+/**
+ * Batch 11 hardening — resolves the "Phase 2.1" gap this file used to carry
+ * as a TODO: user management (deactivate, change role, reset password) is
+ * implemented (electron/ipc/users.ts), so a currently-logged-in user whose
+ * account is deactivated, role-changed, or password-reset must lose access
+ * immediately rather than keep operating under their stale in-memory
+ * session snapshot until they happen to log out or the app restarts.
+ *
+ * Sessions are keyed by webContents.id, not userId, so this scans for every
+ * entry belonging to the given user (normally at most one, but a user could
+ * in principle be logged in from more than one window) and clears each.
+ * Call this from users:setActive (on deactivation), users:update (on role
+ * change), and users:resetPassword.
+ */
+export function clearSessionsForUser(userId: number): void {
+  for (const [webContentsId, session] of store) {
+    if (session.id === userId) store.delete(webContentsId);
+  }
 }
 
 /** Clears all sessions. Called during graceful shutdown. */

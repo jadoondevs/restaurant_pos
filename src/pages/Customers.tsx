@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api } from '@/services/api';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,8 @@ const emptyForm: FormState = { name: '', phone: '', notes: '' };
 
 export function Customers() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canDelete = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [search, setSearch] = useState('');
   const debounced = useDebounce(search, 250);
@@ -121,12 +124,14 @@ export function Customers() {
                   >
                     <Pencil size={16} />
                   </button>
-                  <button
-                    onClick={() => setToDelete(c)}
-                    className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-500 dark:hover:bg-slate-700"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {canDelete && (
+                    <button
+                      onClick={() => setToDelete(c)}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-500 dark:hover:bg-slate-700"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               </li>
             ))}

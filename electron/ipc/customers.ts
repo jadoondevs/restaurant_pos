@@ -38,8 +38,16 @@ export function registerCustomerHandlers() {
     });
   });
 
-  handle('customers:delete', async (_event, id: number) => {
-    await prisma.customer.delete({ where: { id } });
-    return { success: true };
-  });
+  // Batch 11 hardening: every other delete in the app (categories, menu,
+  // orders) is role-gated; this one wasn't. Matches orders:delete's
+  // MANAGER level rather than ADMIN — a customer record is comparable
+  // low-frequency, supervisory-level cleanup, not an admin-only action.
+  handle(
+    'customers:delete',
+    async (_event, id: number) => {
+      await prisma.customer.delete({ where: { id } });
+      return { success: true };
+    },
+    { requiredRole: 'MANAGER' }
+  );
 }
