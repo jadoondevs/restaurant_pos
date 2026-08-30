@@ -1,6 +1,6 @@
 import prisma from '../database/client';
 import { handle } from './util';
-import { resolveDateRange, startOfLocalDay } from '../utils/dateRange';
+import { resolveDateRange, todayRange } from '../utils/dateRange';
 
 interface RangeParams {
   from: string;
@@ -8,14 +8,24 @@ interface RangeParams {
 }
 
 export function registerReportHandlers() {
-  // Unrestricted — any authenticated user can see today's overview.
-  handle('reports:dashboard', async (_event) => {
+  // Unrestricted — any authenticated user can see the overview. Historical
+  // follow-up batch: now accepts an optional {from, to} so the Dashboard can
+  // show any past date/range, not just today. Omitting both preserves the
+  // original today-only behavior exactly.
+  handle('reports:dashboard', async (_event, params?: Partial<RangeParams>) => {
+    const range = resolveDateRange({ from: params?.from, to: params?.to });
+    const today = todayRange();
+    const isToday = range.gte.getTime() === today.gte.getTime() && range.lte.getTime() === today.lte.getTime();
+
     const orders = await prisma.order.findMany({
-      where: { createdAt: { gte: startOfLocalDay() } },
+      where: { createdAt: { gte: range.gte, lte: range.lte } },
       select: { grandTotal: true, tableNumber: true, status: true },
     });
 
     const revenue = orders.reduce((sum, o) => sum + o.grandTotal, 0);
+    // "Active tables" is a live-only concept; for a historical period this
+    // is repurposed as "tables served" (same underlying count, different
+    // label chosen client-side via isToday) rather than a fabricated metric.
     const activeTables = new Set(
       orders.filter((o) => o.tableNumber).map((o) => o.tableNumber)
     ).size;
@@ -26,6 +36,7 @@ export function registerReportHandlers() {
       revenue: +revenue.toFixed(2),
       activeTables,
       averageOrderValue: orders.length ? +(revenue / orders.length).toFixed(2) : 0,
+      isToday,
     };
   });
 
@@ -34,13 +45,25 @@ export function registerReportHandlers() {
     const range = resolveDateRange({ from, to });
     const orders = await prisma.order.findMany({
       where: { createdAt: { gte: range.gte, lte: range.lte } },
-      select: { grandTotal: true, subtotal: true, discount: true, taxAmount: true, createdAt: true },
+      select: {
+        grandTotal: true,
+        subtotal: true,
+        discount: true,
+        taxAmount: true,
+        serviceChargeAmount: true,
+        createdAt: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
     const revenue = orders.reduce((sum, o) => sum + o.grandTotal, 0);
     const totalDiscount = orders.reduce((sum, o) => sum + o.discount, 0);
     const totalTax = orders.reduce((sum, o) => sum + o.taxAmount, 0);
+    const totalSubtotal = orders.reduce((sum, o) => sum + o.subtotal, 0);
+    // Service charge stays out of "revenue" everywhere per the billing
+    // design — totalDue is reported separately alongside it, never merged
+    // into revenue itself.
+    const totalServiceCharge = orders.reduce((sum, o) => sum + o.serviceChargeAmount, 0);
 
     const byDay: Record<string, { date: string; revenue: number; orders: number }> = {};
     for (const o of orders) {
@@ -56,6 +79,9 @@ export function registerReportHandlers() {
       averageOrderValue: orders.length ? +(revenue / orders.length).toFixed(2) : 0,
       totalDiscount: +totalDiscount.toFixed(2),
       totalTax: +totalTax.toFixed(2),
+      totalSubtotal: +totalSubtotal.toFixed(2),
+      totalServiceCharge: +totalServiceCharge.toFixed(2),
+      totalDue: +(revenue + totalServiceCharge).toFixed(2),
       daily: Object.values(byDay).map((d) => ({ ...d, revenue: +d.revenue.toFixed(2) })),
     };
   }, { requiredRole: 'MANAGER' });
@@ -102,6 +128,11 @@ export function registerReportHandlers() {
         orderBy: { createdAt: 'desc' },
       });
 
+      interface PersonItem {
+        name: string;
+        quantity: number;
+        value: number;
+      }
       interface PersonSummary {
         consumptionPersonId: number | null;
         personName: string;
@@ -109,6 +140,7 @@ export function registerReportHandlers() {
         orderCount: number;
         quantity: number;
         value: number;
+        items: Map<string, PersonItem>;
       }
       const byPerson = new Map<string, PersonSummary>();
 
@@ -125,10 +157,20 @@ export function registerReportHandlers() {
           orderCount: 0,
           quantity: 0,
           value: 0,
+          items: new Map<string, PersonItem>(),
         };
         entry.orderCount += 1;
         entry.quantity += order.items.reduce((sum, i) => sum + i.quantity, 0);
         entry.value += orderValue;
+        // Item-level detail (Priority 8) — "what exactly did Employee X
+        // consume", not just a lump sum. Aggregated by item name across
+        // every order this person appears in during the period.
+        for (const i of order.items) {
+          const line = entry.items.get(i.name) ?? { name: i.name, quantity: 0, value: 0 };
+          line.quantity += i.quantity;
+          line.value += i.lineTotal;
+          entry.items.set(i.name, line);
+        }
         byPerson.set(key, entry);
 
         if (order.orderType === 'OWNER_CONSUMPTION') ownerTotal += orderValue;
@@ -148,7 +190,17 @@ export function registerReportHandlers() {
           value: +o.items.reduce((sum, i) => sum + i.lineTotal, 0).toFixed(2),
         })),
         byPerson: [...byPerson.values()]
-          .map((p) => ({ ...p, value: +p.value.toFixed(2) }))
+          .map((p) => ({
+            consumptionPersonId: p.consumptionPersonId,
+            personName: p.personName,
+            orderType: p.orderType,
+            orderCount: p.orderCount,
+            quantity: p.quantity,
+            value: +p.value.toFixed(2),
+            items: [...p.items.values()]
+              .map((i) => ({ ...i, value: +i.value.toFixed(2) }))
+              .sort((a, b) => b.value - a.value),
+          }))
           .sort((a, b) => b.value - a.value),
         totals: {
           ownerTotal: +ownerTotal.toFixed(2),
@@ -323,11 +375,25 @@ export function registerReportHandlers() {
       });
 
       const byDay: Record<string, { date: string; total: number; count: number }> = {};
+      let fixedCount = 0;
+      let fixedTotal = 0;
+      let percentageCount = 0;
+      let percentageTotal = 0;
       for (const o of orders) {
         const key = o.createdAt.toISOString().slice(0, 10);
         byDay[key] ??= { date: key, total: 0, count: 0 };
         byDay[key].total += o.serviceChargeAmount;
         byDay[key].count += 1;
+
+        // Historical breakdown by the TYPE actually charged at sale time
+        // (Order.serviceChargeType), never re-derived from today's Settings.
+        if (o.serviceChargeType === 'FIXED') {
+          fixedCount += 1;
+          fixedTotal += o.serviceChargeAmount;
+        } else if (o.serviceChargeType === 'PERCENTAGE') {
+          percentageCount += 1;
+          percentageTotal += o.serviceChargeAmount;
+        }
       }
 
       const periodTotal = orders.reduce((sum, o) => sum + o.serviceChargeAmount, 0);
@@ -339,6 +405,10 @@ export function registerReportHandlers() {
           .sort((a, b) => a.date.localeCompare(b.date)),
         periodTotal: +periodTotal.toFixed(2),
         orderCount: orders.length,
+        fixedCount,
+        fixedTotal: +fixedTotal.toFixed(2),
+        percentageCount,
+        percentageTotal: +percentageTotal.toFixed(2),
       };
     },
     { requiredRole: 'MANAGER' }

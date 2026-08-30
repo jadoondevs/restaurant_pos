@@ -79,7 +79,7 @@ const api = {
   customerDelete: (id: number) => ipcRenderer.invoke('customers:delete', id),
 
   // Reports
-  dashboardStats: () => ipcRenderer.invoke('reports:dashboard'),
+  dashboardStats: (params?: unknown) => ipcRenderer.invoke('reports:dashboard', params),
   reportSummary: (params: unknown) => ipcRenderer.invoke('reports:summary', params),
   reportTopItems: (params: unknown) => ipcRenderer.invoke('reports:topItems', params),
   reportConsumption: (params: unknown) => ipcRenderer.invoke('reports:consumption', params),
@@ -108,6 +108,7 @@ const api = {
   // Printing
   printReceipt: (html: string) => ipcRenderer.invoke('print:receipt', html),
   printListPrinters: () => ipcRenderer.invoke('print:listPrinters'),
+  reportGeneratePdf: (html: string) => ipcRenderer.invoke('reports:generatePdf', html),
 
   // Backup
   backupStatus: () => ipcRenderer.invoke('backup:status'),

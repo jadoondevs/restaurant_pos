@@ -7,6 +7,7 @@ import { runMigrations } from './migrator';
 import { backupService } from './backup/backupService';
 import { isRestoreInProgress } from './backup/restoreService';
 import { printService } from './services/printService';
+import { pdfService } from './services/pdfService';
 import prisma from './database/client';
 import { logger } from './logger';
 
@@ -173,6 +174,7 @@ app.on('before-quit', async (event) => {
   // Tear down services in order.
   backupService.destroy();
   printService.destroy();
+  pdfService.destroy();
 
   // Explicitly destroy the main window so its renderer process exits cleanly.
   // Without this, the renderer can keep the process alive after app.quit().

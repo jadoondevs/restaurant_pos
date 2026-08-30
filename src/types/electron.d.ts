@@ -111,7 +111,7 @@ export interface ElectronApi {
   customerDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
 
   // Reports
-  dashboardStats(): Promise<IpcResult<any>>;
+  dashboardStats(params?: unknown): Promise<IpcResult<any>>;
   reportSummary(params: unknown): Promise<IpcResult<any>>;
   reportTopItems(params: unknown): Promise<IpcResult<any[]>>;
   reportConsumption(params: unknown): Promise<IpcResult<any>>;
@@ -138,6 +138,7 @@ export interface ElectronApi {
   // Printing — status is the literal union from PrintResult, not string.
   printReceipt(html: string): Promise<IpcResult<PrintResult>>;
   printListPrinters(): Promise<IpcResult<any[]>>;
+  reportGeneratePdf(html: string): Promise<IpcResult<string>>;
 
   // Backup
   backupStatus(): Promise<IpcResult<any>>;

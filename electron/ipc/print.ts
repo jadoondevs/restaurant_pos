@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { handle } from './util';
 import { printService } from '../services/printService';
+import { pdfService } from '../services/pdfService';
 import prisma from '../database/client';
 
 /**
@@ -22,4 +23,17 @@ export function registerPrintHandlers(): void {
 
   ipcMain.removeHandler('print:listPrinters');
   handle('print:listPrinters', async (_event) => printService.listPrinters());
+
+  // Report-to-PDF (follow-up batch, Priority 9) — MANAGER and above, matching
+  // the Reports page's own access level. Returns base64 so the renderer can
+  // trigger a download the same way it already does for CSV (Blob + <a download>).
+  ipcMain.removeHandler('reports:generatePdf');
+  handle(
+    'reports:generatePdf',
+    async (_event, html: string) => {
+      const buffer = await pdfService.generatePdf(html);
+      return buffer.toString('base64');
+    },
+    { requiredRole: 'MANAGER' }
+  );
 }

@@ -5,14 +5,17 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
-import { formatCurrency, formatTime } from '@/utils/format';
+import { formatCurrency, formatTime, formatDate } from '@/utils/format';
 import { buildReceiptHtml, orderToReceiptData } from '@/utils/receipt';
+import { DateFilterBar, describeDateFilter, todayIso, type DateFilterValue } from '@/components/DateRangeControl';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Modal, ConfirmDialog } from '@/components/ui/Modal';
 import { PageHeader, EmptyState, PageLoader, Badge } from '@/components/ui/Misc';
 import type { Order } from '@/types';
+
+const ORDERS_LIMIT = 200;
 
 export function Orders() {
   const { settings, paymentAccounts, socialLinks } = useSettings();
@@ -26,15 +29,18 @@ export function Orders() {
   const debounced = useDebounce(search, 250);
   const [selected, setSelected] = useState<Order | null>(null);
   const [toDelete, setToDelete] = useState<Order | null>(null);
+  // Priority 3 — historical date/date-range selector. Defaults to today,
+  // matching the page's original today-only behavior exactly.
+  const [range, setRange] = useState<DateFilterValue>({ from: todayIso(), to: todayIso() });
 
   const load = () => {
     api
-      .listOrders({ search: debounced })
+      .listOrders({ search: debounced, from: range.from, to: range.to, limit: ORDERS_LIMIT })
       .then(setOrders)
       .catch((e) => toast(e.message, 'error'));
   };
 
-  useEffect(load, [debounced]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [debounced, range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reprint = async (order: Order) => {
     if (!settings) return;
@@ -71,21 +77,34 @@ export function Orders() {
 
   return (
     <div>
-      <PageHeader title="Orders" subtitle="Today's orders" />
+      <PageHeader title="Orders" subtitle={describeDateFilter(range, formatDate)} />
 
-      <div className="relative mb-4 max-w-md">
-        <Search className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
-        <Input
-          placeholder="Search by receipt #, customer, table..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <DateFilterBar value={range} onChange={setRange} />
+        <div className="relative w-full max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
+          <Input
+            placeholder="Search by receipt #, customer, table..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
       </div>
+
+      {orders.length === ORDERS_LIMIT && (
+        <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
+          Showing the most recent {ORDERS_LIMIT} orders in this range — narrow the date range for a
+          complete, precise list.
+        </p>
+      )}
 
       <Card className="p-0">
         {orders.length === 0 ? (
-          <EmptyState title="No orders yet" subtitle="Completed sales will appear here." />
+          <EmptyState
+            title="No orders in this period"
+            subtitle="Try a different date, date range, or search term."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

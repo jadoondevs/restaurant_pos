@@ -244,6 +244,9 @@ export interface DashboardStats {
   revenue: number;
   activeTables: number;
   averageOrderValue: number;
+  /** True when the selected period is exactly today — lets the UI label the
+   *  "activeTables" figure as a live concept vs. a historical "tables served" count. */
+  isToday: boolean;
 }
 
 export interface ReportSummary {
@@ -252,6 +255,9 @@ export interface ReportSummary {
   averageOrderValue: number;
   totalDiscount: number;
   totalTax: number;
+  totalSubtotal: number;
+  totalServiceCharge: number;
+  totalDue: number;
   daily: { date: string; revenue: number; orders: number }[];
 }
 
@@ -273,6 +279,13 @@ export interface ConsumptionOrderSummary {
   value: number;
 }
 
+/** One distinct item a person consumed during the period — the item-level detail Priority 8 requires. */
+export interface ConsumptionPersonItem {
+  name: string;
+  quantity: number;
+  value: number;
+}
+
 export interface ConsumptionPersonSummary {
   consumptionPersonId: number | null;
   personName: string;
@@ -280,6 +293,7 @@ export interface ConsumptionPersonSummary {
   orderCount: number;
   quantity: number;
   value: number;
+  items: ConsumptionPersonItem[];
 }
 
 export interface ConsumptionReport {
@@ -448,6 +462,10 @@ export interface ServiceChargeReport {
   daily: { date: string; total: number; count: number }[];
   periodTotal: number;
   orderCount: number;
+  fixedCount: number;
+  fixedTotal: number;
+  percentageCount: number;
+  percentageTotal: number;
 }
 
 // ---------------------------------------------------------------------------

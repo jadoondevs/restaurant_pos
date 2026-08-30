@@ -127,7 +127,8 @@ export const api = {
   deleteCustomer: (id: number) => unwrap(window.api.customerDelete(id)),
 
   // Reports
-  dashboard: () => unwrap<DashboardStats>(window.api.dashboardStats()),
+  dashboard: (params?: { from?: string; to?: string }) =>
+    unwrap<DashboardStats>(window.api.dashboardStats(params)),
   reportSummary: (params: { from: string; to: string }) =>
     unwrap<ReportSummary>(window.api.reportSummary(params)),
   topItems: (params: { from: string; to: string }) =>
@@ -168,6 +169,7 @@ export const api = {
   // Printing — returns PrintResult (never throws on cancel/fail, only on IPC error)
   printReceipt: (html: string) => unwrap<PrintResult>(window.api.printReceipt(html)),
   listPrinters: () => unwrap<PrinterInfo[]>(window.api.printListPrinters()),
+  generateReportPdf: (html: string) => unwrap<string>(window.api.reportGeneratePdf(html)),
 
   // Backup
   backupStatus: () => unwrap<BackupStatus>(window.api.backupStatus()),

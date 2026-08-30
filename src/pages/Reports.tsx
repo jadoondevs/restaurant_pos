@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Download, DollarSign, ShoppingBag, TrendingUp, Users, HandCoins, Wallet, Receipt } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Download, FileText, DollarSign, ShoppingBag, TrendingUp, Users, HandCoins, Wallet, Receipt } from 'lucide-react';
 import { api } from '@/services/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useToast } from '@/contexts/ToastContext';
 import { formatCurrency, rangeFor, formatDate } from '@/utils/format';
 import { downloadCsv } from '@/utils/csv';
+import { SingleOrRangeInputs, describeDateFilter, todayIso, type DateFilterValue } from '@/components/DateRangeControl';
+import { buildSalesReportCsv, buildSalesReportHtml, downloadTextFile } from '@/utils/salesReport';
 import { Card, StatCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { PageHeader, EmptyState, Spinner } from '@/components/ui/Misc';
@@ -26,18 +28,17 @@ const periodLabels: Record<Period, string> = {
   custom: 'Custom Range',
 };
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function Reports() {
   const { settings } = useSettings();
   const { toast } = useToast();
   const sym = settings?.currencySymbol ?? '$';
 
   const [period, setPeriod] = useState<Period>('today');
-  const [customFrom, setCustomFrom] = useState(todayIso());
-  const [customTo, setCustomTo] = useState(todayIso());
+  // Priority 4: "Custom Range" now supports a single date OR a from/to
+  // range via the shared SingleOrRangeInputs control (from === to means a
+  // single date — resolveDateRange() on the backend already treats a bare
+  // date string that way, so no separate wire format is needed).
+  const [customRange, setCustomRange] = useState<DateFilterValue>({ from: todayIso(), to: todayIso() });
 
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [topItems, setTopItems] = useState<TopItem[]>([]);
@@ -47,16 +48,26 @@ export function Reports() {
   const [serviceChargeReport, setServiceChargeReport] = useState<ServiceChargeReport | null>(null);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [partnerFilter, setPartnerFilter] = useState<number | ''>('');
-  const [loading, setLoading] = useState(true);
+  // Priority 6 fix: distinguish the very first load (full-page spinner is
+  // fine — there's nothing to preserve yet) from every subsequent refetch
+  // (period/date/partner-filter change). Swapping the whole content tree
+  // for a spinner on every refetch was what caused the page to jump to the
+  // top — the tall report collapses to a short centered spinner and back,
+  // resetting scroll. Keeping the existing content mounted during a
+  // refetch (dimmed via `refreshing`) preserves scroll position.
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
   const currentRange = useCallback(
     (): { from: string; to: string } =>
-      period === 'custom' ? { from: customFrom, to: customTo } : rangeFor(period),
-    [period, customFrom, customTo]
+      period === 'custom' ? customRange : rangeFor(period),
+    [period, customRange]
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (hasLoadedOnce.current) setRefreshing(true);
     try {
       const range = currentRange();
       const [sum, tops, cons, partnersRep, paymentsRep, serviceRep, partnerList] = await Promise.all([
@@ -78,7 +89,9 @@ export function Reports() {
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Failed to load reports.', 'error');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
+      hasLoadedOnce.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRange, partnerFilter, toast]);
@@ -87,17 +100,60 @@ export function Reports() {
     load();
   }, [load]);
 
-  const rangeLabel = () => {
-    const r = currentRange();
-    return `${formatDate(r.from)} – ${formatDate(r.to)}`;
+  const rangeLabel = () => describeDateFilter(currentRange(), formatDate);
+
+  /** Fetches an all-partners view of the partner report for export — export
+   *  must always include every partner regardless of the on-screen filter
+   *  (Priority 5/7B: "Do not require selecting one partner to export"). */
+  const fullPartnerReportForExport = async (): Promise<PartnerReport> => {
+    if (!partnerFilter) return partnerReport ?? { partners: [], grandTotal: 0 };
+    return api.partnerReport(currentRange());
   };
 
-  const exportSales = () => {
-    if (!summary?.daily.length) return toast('Nothing to export.', 'info');
-    downloadCsv(
-      `sales-${period}-${todayIso()}.csv`,
-      summary.daily.map((d) => ({ Date: d.date, Orders: d.orders, Revenue: d.revenue.toFixed(2) }))
-    );
+  const buildReportData = async () => {
+    if (!settings || !summary || !consumption || !paymentReport || !serviceChargeReport) return null;
+    const range = currentRange();
+    const allPartners = await fullPartnerReportForExport();
+    return {
+      from: range.from,
+      to: range.to,
+      settings,
+      summary,
+      partnerReport: allPartners,
+      consumption,
+      paymentReport,
+      serviceChargeReport,
+    };
+  };
+
+  const exportSales = async () => {
+    const data = await buildReportData();
+    if (!data) return toast('Nothing to export.', 'info');
+    downloadTextFile(`general-sales-report-${todayIso()}.csv`, buildSalesReportCsv(data), 'text/csv;charset=utf-8;');
+  };
+
+  const exportSalesPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const data = await buildReportData();
+      if (!data) return toast('Nothing to export.', 'info');
+      const html = buildSalesReportHtml(data);
+      const base64 = await api.generateReportPdf(html);
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `general-sales-report-${todayIso()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'PDF export failed.', 'error');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const exportTopItems = () => {
@@ -110,16 +166,18 @@ export function Reports() {
 
   const exportConsumption = () => {
     if (!consumption?.byPerson.length) return toast('Nothing to export.', 'info');
-    downloadCsv(
-      `owner-employee-consumption-${period}-${todayIso()}.csv`,
-      consumption.byPerson.map((p) => ({
+    // Item-level rows (Priority 8) — "what exactly did Employee X consume",
+    // not just a lump sum per person.
+    const rows = consumption.byPerson.flatMap((p) =>
+      p.items.map((i) => ({
         Person: p.personName,
         Type: p.orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee',
-        Orders: p.orderCount,
-        Quantity: p.quantity,
-        Value: p.value.toFixed(2),
+        Item: i.name,
+        Quantity: i.quantity,
+        Value: i.value.toFixed(2),
       }))
     );
+    downloadCsv(`owner-employee-consumption-${period}-${todayIso()}.csv`, rows);
   };
 
   const exportPartners = () => {
@@ -174,9 +232,14 @@ export function Reports() {
         title="Reports"
         subtitle={`Sales performance and insights — ${rangeLabel()}`}
         action={
-          <Button variant="secondary" onClick={exportSales}>
-            <Download size={18} /> Export Sales CSV
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={exportSales}>
+              <Download size={18} /> Export CSV
+            </Button>
+            <Button variant="secondary" onClick={exportSalesPdf} disabled={exportingPdf}>
+              <FileText size={18} /> {exportingPdf ? 'Generating…' : 'Export PDF'}
+            </Button>
+          </div>
         }
       />
 
@@ -198,33 +261,21 @@ export function Reports() {
           ))}
         </div>
 
-        {period === 'custom' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customFrom}
-              max={customTo}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
-            />
-            <span className="text-slate-400">to</span>
-            <input
-              type="date"
-              value={customTo}
-              min={customFrom}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
-            />
-          </div>
+        {period === 'custom' && <SingleOrRangeInputs value={customRange} onChange={setCustomRange} />}
+
+        {refreshing && !initialLoading && (
+          <span className="flex items-center gap-1.5 text-xs text-slate-400">
+            <Spinner className="h-3.5 w-3.5" /> Updating…
+          </span>
         )}
       </div>
 
-      {loading || !summary ? (
+      {initialLoading || !summary ? (
         <div className="flex justify-center py-16 text-slate-400">
           <Spinner className="h-8 w-8" />
         </div>
       ) : (
-        <>
+        <div className={refreshing ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label="Revenue"
@@ -353,28 +404,41 @@ export function Reports() {
                     accent="text-brand-600"
                   />
                 </div>
-                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
                   {consumption.byPerson.map((p) => (
-                    <li
-                      key={`${p.consumptionPersonId}-${p.orderType}`}
-                      className="flex items-center justify-between py-2.5"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          {p.personName}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {p.orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee'} ·{' '}
-                          {p.orderCount} order{p.orderCount === 1 ? '' : 's'} · {p.quantity} item
-                          {p.quantity === 1 ? '' : 's'}
+                    <div key={`${p.consumptionPersonId}-${p.orderType}`} className="py-3">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                            {p.personName}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {p.orderType === 'OWNER_CONSUMPTION' ? 'Owner' : 'Employee'} ·{' '}
+                            {p.orderCount} order{p.orderCount === 1 ? '' : 's'} · {p.quantity} item
+                            {p.quantity === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {formatCurrency(p.value, sym)}
                         </p>
                       </div>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {formatCurrency(p.value, sym)}
-                      </p>
-                    </li>
+                      {/* Item-level detail (Priority 8) — always visible, not
+                          just a lump-sum total, so "what exactly did Employee
+                          X consume?" is answerable directly from this list. */}
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {p.items.map((i) => (
+                            <tr key={i.name} className="text-slate-500 dark:text-slate-400">
+                              <td className="py-0.5 pl-3">{i.name}</td>
+                              <td className="py-0.5 text-right">× {i.quantity}</td>
+                              <td className="py-0.5 pl-3 text-right">{formatCurrency(i.value, sym)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </>
             )}
           </Card>
@@ -405,7 +469,18 @@ export function Reports() {
             </div>
 
             {!partnerReport || partnerReport.partners.length === 0 ? (
-              <EmptyState title="No partner-owned sales in this period" />
+              <EmptyState
+                title={
+                  partnerFilter
+                    ? 'This partner has no ownership on items sold in this period'
+                    : 'No partner-owned sales in this period'
+                }
+                subtitle={
+                  partnerFilter
+                    ? 'Try "All Partners" or a different date range.'
+                    : 'This means no order in this period contained an item that had partner ownership configured (Menu → item → Partner Ownership) at the time it was sold. It is not an error — configure ownership and make a sale to see data here.'
+                }
+              />
             ) : (
               <div className="space-y-5">
                 {partnerReport.partners.map((p) => (
@@ -561,7 +636,7 @@ export function Reports() {
               </>
             )}
           </Card>
-        </>
+        </div>
       )}
     </div>
   );
