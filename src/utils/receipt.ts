@@ -1,5 +1,6 @@
-import type { Settings, ReceiptData } from '@/types';
+import type { Settings, ReceiptData, PaymentAccount, SocialLink } from '@/types';
 import { formatDate, formatTime } from './format';
+import { buildQrCodeSvg } from './qrcode';
 
 /**
  * Builds a self-contained HTML receipt string.
@@ -10,12 +11,31 @@ import { formatDate, formatTime } from './format';
  *
  * Works with both saved Order objects and draft ReceiptData so the receipt
  * can be printed BEFORE the order is committed to the database.
+ *
+ * paymentAccounts/socialLinks are the LIVE, current config (fetched fresh
+ * by the caller, e.g. from SettingsContext) — printed as instructions for
+ * how to pay / where to find the restaurant, deliberately NOT historical
+ * snapshots the way Payment or OrderItemPartnerAllocation are, since a
+ * "ways to pay" footer describes what's true today, not what was true when
+ * this particular order happened.
  */
-export function buildReceiptHtml(data: ReceiptData, settings: Settings): string {
+export function buildReceiptHtml(
+  data: ReceiptData,
+  settings: Settings,
+  paymentAccounts: PaymentAccount[] = [],
+  socialLinks: SocialLink[] = []
+): string {
   const sym = settings.currencySymbol || '$';
   const money = (n: number) => `${sym}${n.toFixed(2)}`;
   const paperSize = settings.receiptPaperSize ?? '80mm';
   const isA4 = paperSize === 'A4';
+
+  const printableAccounts = paymentAccounts.filter((a) => a.isActive && a.printOnReceipt);
+  const printableSocialLinks = socialLinks
+    .filter((l) => l.isEnabled && l.showOnReceipt)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const showLogo = !!(settings.receiptShowLogo && settings.logoPath);
+  const showReviewQr = !!(settings.googleReviewOnReceipt && settings.googleReviewUrl);
 
   const itemRows = data.items
     .map(
@@ -73,6 +93,15 @@ export function buildReceiptHtml(data: ReceiptData, settings: Settings): string 
   .totals .val { text-align: right; }
   .grand { font-size: 14px; font-weight: bold; }
   .footer { margin-top: 8px; font-size: 11px; }
+  .logo { max-width: 60px; max-height: 60px; margin: 0 auto 4px; display: block; }
+  .payopt { margin-top: 4px; }
+  .payopt .heading { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
+  .payopt .line { font-size: 11px; }
+  .social { margin-top: 4px; font-size: 11px; }
+  .qr-wrap { margin-top: 8px; text-align: center; }
+  .qr-wrap svg { width: 70px; height: 70px; }
+  .qr-wrap .qr-label { font-size: 10px; margin-top: 2px; }
+  .due { color: #000; }
   @media print {
     body { width: ${bodyWidth}; }
     .receipt { width: ${contentWidth}; margin: ${contentMargin}; }
@@ -82,6 +111,7 @@ export function buildReceiptHtml(data: ReceiptData, settings: Settings): string 
 <body>
 <div class="receipt">
   <div class="center">
+    ${showLogo ? `<img class="logo" src="${settings.logoPath}" alt="" />` : ''}
     <div class="title">${escapeHtml(settings.restaurantName)}</div>
     ${settings.address ? `<div class="muted">${escapeHtml(settings.address)}</div>` : ''}
     ${settings.phone ? `<div class="muted">${escapeHtml(settings.phone)}</div>` : ''}
@@ -121,14 +151,61 @@ export function buildReceiptHtml(data: ReceiptData, settings: Settings): string 
         : ''
     }
     <tr class="grand"><td class="label">TOTAL</td><td class="val">${money(data.grandTotal)}</td></tr>
+    ${
+      data.serviceChargeAmount > 0
+        ? `<tr><td class="label">Service Charge${
+            data.serviceChargeType === 'PERCENTAGE' ? ` (${data.serviceChargeValue}%)` : ''
+          }</td><td class="val">${money(data.serviceChargeAmount)}</td></tr>
+           <tr class="grand"><td class="label">TOTAL DUE</td><td class="val">${money(data.totalDue)}</td></tr>`
+        : ''
+    }
     <tr><td class="label">Cash</td><td class="val">${money(data.cashReceived)}</td></tr>
     <tr><td class="label">Change</td><td class="val">${money(data.change)}</td></tr>
+    ${
+      data.paymentStatus !== 'PAID'
+        ? `<tr class="due"><td class="label bold">Balance Due</td><td class="val bold">${money(
+            Math.max(0, data.totalDue - data.payments.reduce((s, p) => s + p.amount, 0))
+          )}</td></tr>`
+        : ''
+    }
   </table>
+  ${printableAccounts.length > 0 ? buildPaymentOptionsHtml(printableAccounts) : ''}
   <hr />
   <div class="center footer">${escapeHtml(settings.receiptFooter)}</div>
+  ${printableSocialLinks.length > 0 ? buildSocialLinksHtml(printableSocialLinks) : ''}
+  ${showReviewQr ? buildReviewQrHtml(settings.googleReviewUrl as string) : ''}
 </div>
 </body>
 </html>`;
+}
+
+/** Renders the live "ways to pay" instructions from active, printable PaymentAccounts. */
+function buildPaymentOptionsHtml(accounts: PaymentAccount[]): string {
+  const lines = accounts
+    .map((a) => {
+      const detail =
+        a.type === 'BANK'
+          ? [a.bankName, a.accountNumber, a.iban ? `IBAN: ${a.iban}` : null].filter(Boolean).join(' — ')
+          : a.phoneNumber ?? '';
+      return `<div class="line"><span class="bold">${escapeHtml(a.displayName)}</span>${
+        detail ? `: ${escapeHtml(detail)}` : ''
+      }</div>`;
+    })
+    .join('');
+  return `<div class="payopt"><div class="heading">Ways to Pay</div>${lines}</div>`;
+}
+
+/** Renders the live "follow us" footer from enabled, receipt-visible SocialLinks. */
+function buildSocialLinksHtml(links: SocialLink[]): string {
+  const lines = links
+    .map((l) => `<div>${escapeHtml(l.displayName)}: ${escapeHtml(l.value)}</div>`)
+    .join('');
+  return `<div class="center social">${lines}</div>`;
+}
+
+/** Renders a locally-generated Google Review QR code — no external service call. */
+function buildReviewQrHtml(url: string): string {
+  return `<div class="qr-wrap">${buildQrCodeSvg(url)}<div class="qr-label">Scan to leave a review</div></div>`;
 }
 
 /** Converts a saved Order to ReceiptData for reprinting. */
@@ -152,7 +229,13 @@ export function orderToReceiptData(order: {
   grandTotal: number;
   cashReceived: number;
   change: number;
+  serviceChargeType?: ReceiptData['serviceChargeType'];
+  serviceChargeValue?: number;
+  serviceChargeAmount?: number;
+  paymentStatus?: ReceiptData['paymentStatus'];
+  payments?: { method: string; amount: number; accountDisplayName: string | null }[];
 }): ReceiptData {
+  const serviceChargeAmount = order.serviceChargeAmount ?? 0;
   return {
     receiptNumber: order.receiptNumber,
     createdAt: order.createdAt,
@@ -167,6 +250,12 @@ export function orderToReceiptData(order: {
     grandTotal: order.grandTotal,
     cashReceived: order.cashReceived,
     change: order.change,
+    serviceChargeType: order.serviceChargeType ?? 'NONE',
+    serviceChargeValue: order.serviceChargeValue ?? 0,
+    serviceChargeAmount,
+    totalDue: +(order.grandTotal + serviceChargeAmount).toFixed(2),
+    paymentStatus: order.paymentStatus ?? 'PAID',
+    payments: order.payments ?? [],
   };
 }
 

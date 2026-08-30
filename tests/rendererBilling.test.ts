@@ -41,4 +41,21 @@ describe('renderer billing mirrors the main-process calculation', () => {
       );
     }
   });
+
+  it('computePaymentStatus matches for every case', () => {
+    const cases: [number, { amount: number }[]][] = [
+      [1000, []],
+      [1000, [{ amount: 0 }]],
+      [1000, [{ amount: 500 }]],
+      [1000, [{ amount: 1000 }]],
+      [1000, [{ amount: 999.995 }]], // within epsilon — PAID
+      [1000, [{ amount: 300 }, { amount: 700 }]],
+      [1000, [{ amount: 1500 }]], // overpayment — still PAID
+    ];
+    for (const [totalDue, payments] of cases) {
+      expect(rendererBilling.computePaymentStatus(totalDue, payments)).toBe(
+        mainBilling.computePaymentStatus(totalDue, payments)
+      );
+    }
+  });
 });

@@ -8,7 +8,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/utils/format';
 import { buildReceiptHtml } from '@/utils/receipt';
-import { calculateServiceCharge, calculateTotalDue } from '@/utils/billing';
+import { calculateServiceCharge, calculateTotalDue, computePaymentStatus } from '@/utils/billing';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -28,7 +28,7 @@ type CheckoutIssue =
   | { kind: 'failed'; error: string };
 
 export function POS() {
-  const { settings } = useSettings();
+  const { settings, paymentAccounts, socialLinks } = useSettings();
   const { toast } = useToast();
   const { user } = useAuth();
   const sym = settings?.currencySymbol ?? '$';
@@ -226,6 +226,12 @@ export function POS() {
       const cashAmt = parseFloat(cashReceived) || totalDue;
       const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
+      // Mirrors orders:create's payment derivation exactly (electron/ipc/orders.ts)
+      // so the printed draft matches what actually gets persisted a moment later.
+      const paymentAmount = +Math.min(Math.max(0, cashAmt), totalDue).toFixed(2);
+      const paymentStatus =
+        paymentAmount > 0 ? computePaymentStatus(totalDue, [{ amount: paymentAmount }]) : 'PENDING';
+
       const receiptData: ReceiptData = {
         receiptNumber,
         createdAt: new Date().toISOString(),
@@ -246,10 +252,16 @@ export function POS() {
         grandTotal: cart.totals.grandTotal,
         cashReceived: cashAmt,
         change: Math.max(0, cashAmt - totalDue),
+        serviceChargeType,
+        serviceChargeValue: parseFloat(serviceChargeValue) || 0,
+        serviceChargeAmount,
+        totalDue,
+        paymentStatus,
+        payments: paymentAmount > 0 ? [{ method: 'CASH', amount: paymentAmount, accountDisplayName: null }] : [],
       };
 
       // 3. Print the receipt.
-      const html = buildReceiptHtml(receiptData, settings);
+      const html = buildReceiptHtml(receiptData, settings, paymentAccounts, socialLinks);
       const printResult = await api.printReceipt(html);
 
       if (printResult.status === 'printed') {
@@ -272,7 +284,7 @@ export function POS() {
     if (!pendingReceipt || !settings) return;
     setSaving(true);
     try {
-      const html = buildReceiptHtml(pendingReceipt, settings);
+      const html = buildReceiptHtml(pendingReceipt, settings, paymentAccounts, socialLinks);
       const printResult = await api.printReceipt(html);
       if (printResult.status === 'printed') {
         await commitSale(pendingReceipt);

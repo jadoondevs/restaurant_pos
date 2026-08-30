@@ -15,7 +15,7 @@ import { PageHeader, EmptyState, PageLoader, Badge } from '@/components/ui/Misc'
 import type { Order } from '@/types';
 
 export function Orders() {
-  const { settings } = useSettings();
+  const { settings, paymentAccounts, socialLinks } = useSettings();
   const { toast } = useToast();
   const { user } = useAuth();
   const sym = settings?.currencySymbol ?? '$';
@@ -41,7 +41,7 @@ export function Orders() {
     try {
       const full = await api.getOrder(order.id);
       const receiptData = orderToReceiptData(full);
-      const html = buildReceiptHtml(receiptData, settings);
+      const html = buildReceiptHtml(receiptData, settings, paymentAccounts, socialLinks);
       const result = await api.printReceipt(html);
       if (result.status === 'printed') {
         toast('Receipt sent to printer.', 'success');
@@ -192,8 +192,24 @@ export function Orders() {
                 value={formatCurrency(selected.taxAmount, sym)}
               />
               <Line label="Total" value={formatCurrency(selected.grandTotal, sym)} bold />
+              {selected.serviceChargeAmount > 0 && (
+                <>
+                  <Line
+                    label={`Service Charge${
+                      selected.serviceChargeType === 'PERCENTAGE' ? ` (${selected.serviceChargeValue}%)` : ''
+                    }`}
+                    value={formatCurrency(selected.serviceChargeAmount, sym)}
+                  />
+                  <Line
+                    label="Total Due"
+                    value={formatCurrency(selected.grandTotal + selected.serviceChargeAmount, sym)}
+                    bold
+                  />
+                </>
+              )}
               <Line label="Cash" value={formatCurrency(selected.cashReceived, sym)} />
               <Line label="Change" value={formatCurrency(selected.change, sym)} />
+              <Line label="Payment Status" value={selected.paymentStatus} />
             </div>
           </div>
         )}

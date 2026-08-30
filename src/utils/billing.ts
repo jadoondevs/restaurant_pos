@@ -28,3 +28,17 @@ export function calculateServiceCharge(
 export function calculateTotalDue(grandTotal: number, serviceChargeAmount: number): number {
   return +((grandTotal || 0) + (serviceChargeAmount || 0)).toFixed(2);
 }
+
+export type PaymentStatus = 'PENDING' | 'PARTIAL' | 'PAID';
+
+const STATUS_EPSILON = 0.01;
+
+export function computePaymentStatus(
+  totalDue: number,
+  payments: { amount: number }[]
+): PaymentStatus {
+  const paid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  if (paid <= 0) return 'PENDING';
+  if (paid + STATUS_EPSILON >= totalDue) return 'PAID';
+  return 'PARTIAL';
+}

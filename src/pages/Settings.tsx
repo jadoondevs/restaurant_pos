@@ -39,7 +39,7 @@ const emptyPaymentAccount: Partial<PaymentAccount> = {
 };
 
 export function Settings() {
-  const { settings, update } = useSettings();
+  const { settings, update, refresh: refreshSettingsContext } = useSettings();
   const { user, refreshUser } = useAuth();
   const { toast } = useToast();
 
@@ -174,6 +174,7 @@ export function Settings() {
       }
       setSocialModalOpen(false);
       toast('Social link saved.', 'success');
+      refreshSettingsContext().catch(() => {});
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed.', 'error');
     }
@@ -182,6 +183,7 @@ export function Settings() {
     try {
       const updated = await api.updateSocialLink(link.id, { ...link, [field]: !link[field] });
       setSocialLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      refreshSettingsContext().catch(() => {});
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Update failed.', 'error');
     }
@@ -193,6 +195,7 @@ export function Settings() {
       setSocialLinks((prev) => prev.filter((l) => l.id !== socialToDelete.id));
       setSocialToDelete(null);
       toast('Social link removed.', 'success');
+      refreshSettingsContext().catch(() => {});
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Delete failed.', 'error');
     }
@@ -221,6 +224,7 @@ export function Settings() {
       }
       setAccountModalOpen(false);
       toast('Payment account saved.', 'success');
+      refreshSettingsContext().catch(() => {});
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed.', 'error');
     }
@@ -234,6 +238,7 @@ export function Settings() {
         const updated = await api.updatePaymentAccount(account.id, { ...account, printOnReceipt: !account.printOnReceipt });
         setPaymentAccounts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       }
+      refreshSettingsContext().catch(() => {});
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Update failed.', 'error');
     }

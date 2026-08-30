@@ -7,19 +7,30 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '@/services/api';
-import type { Settings } from '@/types';
+import type { Settings, PaymentAccount, SocialLink } from '@/types';
 
 interface SettingsContextValue {
   settings: Settings | null;
   loading: boolean;
   refresh: () => Promise<void>;
   update: (data: Partial<Settings>) => Promise<void>;
+  /**
+   * Live payment accounts / social links, loaded alongside settings and
+   * refreshed together with it. Any page that prints a receipt (POS, Orders)
+   * reads these here rather than fetching separately, so they're always the
+   * copy the receipt-config Settings page just wrote. Settings.tsx's own
+   * CRUD calls refresh() afterward to keep this copy current too.
+   */
+  paymentAccounts: PaymentAccount[];
+  socialLinks: SocialLink[];
 }
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(undefined);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [socialLinks, setSocialLinks] = useState<SocialLink[]>([]);
   const [loading, setLoading] = useState(true);
 
   const applyDarkMode = (dark: boolean) => {
@@ -27,8 +38,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   };
 
   const refresh = useCallback(async () => {
-    const data = await api.getSettings();
+    const [data, accounts, links] = await Promise.all([
+      api.getSettings(),
+      api.listPaymentAccounts(),
+      api.listSocialLinks(),
+    ]);
     setSettings(data);
+    setPaymentAccounts(accounts);
+    setSocialLinks(links);
     applyDarkMode(data.darkMode);
   }, []);
 
@@ -43,7 +60,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   return (
-    <SettingsContext.Provider value={{ settings, loading, refresh, update }}>
+    <SettingsContext.Provider value={{ settings, loading, refresh, update, paymentAccounts, socialLinks }}>
       {children}
     </SettingsContext.Provider>
   );

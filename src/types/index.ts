@@ -368,6 +368,13 @@ export interface ReceiptData {
   grandTotal: number;
   cashReceived: number;
   change: number;
+  serviceChargeType: ServiceChargeType;
+  serviceChargeValue: number;
+  serviceChargeAmount: number;
+  totalDue: number;
+  paymentStatus: PaymentStatus;
+  /** Actual payments applied toward this order — see Payment in the domain types above. */
+  payments: { method: string; amount: number; accountDisplayName: string | null }[];
 }
 
 // ---------------------------------------------------------------------------
