@@ -186,6 +186,44 @@ export interface Settings {
   backupSchedule: string;      // 'daily' | 'weekly' | 'manual'
   backupOnExit: boolean;
   cloudBackupEnabled: boolean;
+  logoPath: string | null;     // despite the name, stores a data URL (same convention as MenuItem.image)
+  currencyCode: string;
+  receiptShowLogo: boolean;
+  serviceChargePresets: string | null; // JSON array of numbers, e.g. "[50,100,150]"
+  googleReviewUrl: string | null;
+  googleReviewOnReceipt: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Social links & payment accounts (Batch 8)
+// ---------------------------------------------------------------------------
+
+export type SocialPlatform = 'FACEBOOK' | 'INSTAGRAM' | 'TIKTOK' | 'WHATSAPP' | 'WEBSITE' | 'OTHER';
+
+export interface SocialLink {
+  id: number;
+  platform: SocialPlatform;
+  displayName: string;
+  value: string;
+  isEnabled: boolean;
+  showOnReceipt: boolean;
+  sortOrder: number;
+}
+
+export type PaymentMethodType = 'CASH' | 'EASYPAISA' | 'BANK';
+
+export interface PaymentAccount {
+  id: number;
+  type: PaymentMethodType;
+  displayName: string;
+  accountHolderName: string | null;
+  phoneNumber: string | null;
+  bankName: string | null;
+  accountNumber: string | null;
+  iban: string | null;
+  isActive: boolean;
+  printOnReceipt: boolean;
+  sortOrder: number;
 }
 
 // ---------------------------------------------------------------------------

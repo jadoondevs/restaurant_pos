@@ -9,6 +9,8 @@ import { registerConsumptionPersonHandlers } from './consumptionPersons';
 import { registerCustomerHandlers } from './customers';
 import { registerReportHandlers } from './reports';
 import { registerSettingsHandlers } from './settings';
+import { registerSocialLinkHandlers } from './socialLinks';
+import { registerPaymentAccountHandlers } from './paymentAccounts';
 import { registerPrintHandlers } from './print';
 import { registerBackupHandlers } from './backup';
 import { registerUserHandlers } from './users';
@@ -27,6 +29,8 @@ export function registerIpcHandlers() {
   registerCustomerHandlers();
   registerReportHandlers();
   registerSettingsHandlers();
+  registerSocialLinkHandlers();
+  registerPaymentAccountHandlers();
   registerPrintHandlers();
   registerBackupHandlers();
 }

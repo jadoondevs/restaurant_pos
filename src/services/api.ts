@@ -19,6 +19,8 @@ import type {
   ServiceChargeReport,
   BulkImportRow,
   BulkImportResult,
+  SocialLink,
+  PaymentAccount,
   PrintResult,
   BackupStatus,
   BackupRecord,
@@ -145,6 +147,22 @@ export const api = {
   // Settings
   getSettings: () => unwrap<Settings>(window.api.settingsGet()),
   updateSettings: (data: Partial<Settings>) => unwrap<Settings>(window.api.settingsUpdate(data)),
+
+  // Social links
+  listSocialLinks: () => unwrap<SocialLink[]>(window.api.socialLinksList()),
+  createSocialLink: (data: Partial<SocialLink>) => unwrap<SocialLink>(window.api.socialLinkCreate(data)),
+  updateSocialLink: (id: number, data: Partial<SocialLink>) =>
+    unwrap<SocialLink>(window.api.socialLinkUpdate(id, data)),
+  deleteSocialLink: (id: number) => unwrap(window.api.socialLinkDelete(id)),
+
+  // Payment accounts
+  listPaymentAccounts: () => unwrap<PaymentAccount[]>(window.api.paymentAccountsList()),
+  createPaymentAccount: (data: Partial<PaymentAccount>) =>
+    unwrap<PaymentAccount>(window.api.paymentAccountCreate(data)),
+  updatePaymentAccount: (id: number, data: Partial<PaymentAccount>) =>
+    unwrap<PaymentAccount>(window.api.paymentAccountUpdate(id, data)),
+  setPaymentAccountActive: (id: number, isActive: boolean) =>
+    unwrap<PaymentAccount>(window.api.paymentAccountSetActive({ id, isActive })),
 
   // Printing — returns PrintResult (never throws on cancel/fail, only on IPC error)
   printReceipt: (html: string) => unwrap<PrintResult>(window.api.printReceipt(html)),

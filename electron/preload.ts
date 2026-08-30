@@ -91,6 +91,20 @@ const api = {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsUpdate: (data: unknown) => ipcRenderer.invoke('settings:update', data),
 
+  // Social links
+  socialLinksList: () => ipcRenderer.invoke('socialLinks:list'),
+  socialLinkCreate: (data: unknown) => ipcRenderer.invoke('socialLinks:create', data),
+  socialLinkUpdate: (id: number, data: unknown) => ipcRenderer.invoke('socialLinks:update', { id, data }),
+  socialLinkDelete: (id: number) => ipcRenderer.invoke('socialLinks:delete', id),
+
+  // Payment accounts
+  paymentAccountsList: () => ipcRenderer.invoke('paymentAccounts:list'),
+  paymentAccountCreate: (data: unknown) => ipcRenderer.invoke('paymentAccounts:create', data),
+  paymentAccountUpdate: (id: number, data: unknown) =>
+    ipcRenderer.invoke('paymentAccounts:update', { id, data }),
+  paymentAccountSetActive: (data: { id: number; isActive: boolean }) =>
+    ipcRenderer.invoke('paymentAccounts:setActive', data),
+
   // Printing
   printReceipt: (html: string) => ipcRenderer.invoke('print:receipt', html),
 

@@ -28,7 +28,7 @@ export async function ensureBootstrap(): Promise<void> {
     create: {
       id: 1,
       restaurantName: 'My Restaurant',
-      currencySymbol: '$',
+      currencySymbol: 'Rs',
       receiptFooter: 'Thank you for dining with us!',
       receiptPaperSize: '80mm',
       backupSchedule: 'daily',

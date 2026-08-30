@@ -123,6 +123,18 @@ export interface ElectronApi {
   settingsGet(): Promise<IpcResult<any>>;
   settingsUpdate(data: unknown): Promise<IpcResult<any>>;
 
+  // Social links
+  socialLinksList(): Promise<IpcResult<any[]>>;
+  socialLinkCreate(data: unknown): Promise<IpcResult<any>>;
+  socialLinkUpdate(id: number, data: unknown): Promise<IpcResult<any>>;
+  socialLinkDelete(id: number): Promise<IpcResult<{ success: boolean }>>;
+
+  // Payment accounts
+  paymentAccountsList(): Promise<IpcResult<any[]>>;
+  paymentAccountCreate(data: unknown): Promise<IpcResult<any>>;
+  paymentAccountUpdate(id: number, data: unknown): Promise<IpcResult<any>>;
+  paymentAccountSetActive(data: { id: number; isActive: boolean }): Promise<IpcResult<any>>;
+
   // Printing — status is the literal union from PrintResult, not string.
   printReceipt(html: string): Promise<IpcResult<PrintResult>>;
 
